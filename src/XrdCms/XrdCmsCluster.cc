@@ -35,6 +35,7 @@
 #include <unistd.h>
 #include <netinet/in.h>
 #include <sys/types.h>
+#include <cstring>
 
 #include "XProtocol/YProtocol.hh"
   
@@ -599,9 +600,9 @@ int XrdCmsCluster::Locate(XrdCmsSelect &Sel)
    SMask_t       qfVec(0);
    char         *Path;
    int           retc = 0;
-
+   Say.Emsg("LOCATE path",Sel.Path.Val,"Path+1",Sel.Path.Val+1);
 // Check if this is a locate for all current servers
-//
+// 
    if (*Sel.Path.Val != '*') Path = Sel.Path.Val;
       else {if (*(Sel.Path.Val+1) == '\0')
                {Sel.Vec.hf = ~0LL; Sel.Vec.pf = Sel.Vec.wf = 0;
@@ -934,7 +935,12 @@ int XrdCmsCluster::Select(XrdCmsSelect &Sel)
    const char  *Amode;
    int dowt = 0, retc = 0, isRW, fRD, noSel = (Sel.Opts & XrdCmsSelect::Defer);
    SMask_t amask, smask, pmask;
-
+   std::string pathname=Sel.Path.Val;
+   if (!pathname.empty() && *pathname.rbegin() != '/'){
+       pathname = '/'+pathname;
+ //  char *cstr = new char[pt.length() + 1];
+       strcpy(Sel.Path.Val, pathname.c_str());
+    }
 // Establish some local options
 //
    if (Sel.Opts & XrdCmsSelect::Write) 
@@ -955,7 +961,7 @@ int XrdCmsCluster::Select(XrdCmsSelect &Sel)
        Sel.Resp.Port = kYR_ENOENT;
        return EReplete;
       }
-
+      Say.Emsg("SELECT path",Sel.Path.Val);
 // If we are running a shared file system preform an optional restricted
 // pre-selection and then do a standard selection. Since all nodes are equal,
 // make sure the client is needlessly avoiding them as this signals an error.
