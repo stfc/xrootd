@@ -935,6 +935,7 @@ int XrdCmsCluster::Select(XrdCmsSelect &Sel)
    const char  *Amode;
    int dowt = 0, retc = 0, isRW, fRD, noSel = (Sel.Opts & XrdCmsSelect::Defer);
    SMask_t amask, smask, pmask;
+   //check if path name has a starting / . If not, add it so server path requests resolve properly
    std::string pathname=Sel.Path.Val;
    if (!pathname.empty() && *pathname.rbegin() != '/'){
        pathname = '/'+pathname;
