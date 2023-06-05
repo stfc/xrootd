@@ -31,6 +31,7 @@
 #include <cstdio>
 #include <string>
 #include <sys/time.h>
+#include <cstring>
 
 #include "XrdSfs/XrdSfsInterface.hh"
 #include "XrdSfs/XrdSfsFlags.hh"
@@ -1375,6 +1376,12 @@ int XrdXrootdProtocol::do_Open()
    char *opaque, usage, ebuff[2048], opC;
    bool doDig, doforce = false, isAsync = false;
    char *fn = argp->buff, opt[16], *op=opt;
+      std::string pathname=fn;
+   if (!pathname.empty() && *pathname.rbegin() != '/'){
+       pathname = '/'+pathname;
+ //      char *cstr = new char[pathname.length() + 1];
+       strcpy(fn, pathname.c_str());
+       }
    XrdSfsFile *fp;
    XrdXrootdFile *xp;
    struct stat statbuf;
@@ -4058,11 +4065,18 @@ void XrdXrootdProtocol::MonAuth()
 int XrdXrootdProtocol::rpCheck(char *fn, char **opaque)
 {
    char *cp;
-
+   
    if (*fn != '/')
       {if (!(XPList.Opts() & XROOTDXP_NOSLASH)) return 1;
        if (  XPList.Opts() & XROOTDXP_NOCGI) {*opaque = 0; return 0;}
       }
+   std::string pathname=fn;
+   if (!pathname.empty() && *pathname.rbegin() != '/'){
+       pathname = '/'+pathname;
+ //      char *cstr = new char[pathname.length() + 1];
+          strcpy(fn, pathname.c_str());
+       }
+      
 
    if (!(cp = index(fn, '?'))) *opaque = 0;
       else {*cp = '\0'; *opaque = cp+1;
