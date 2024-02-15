@@ -125,11 +125,14 @@ echo "[i] Working with version: $VERSION"
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/
 #-------------------------------------------------------------------------------
 
-VERSION=${VERSION#v} # remove "v" prefix
-VERSION=${VERSION/-rc/~rc} # release candidates use ~ in RPMs
-VERSION=${VERSION/-g*/} # snapshots versions not supported well, filter out
-VERSION=${VERSION/-/.post} # handle git describe for post releases
-VERSION=${VERSION//-/.} # replace remaining dashes with dots
+#-------------------------------------------------------------------------------
+# Deal with release candidates
+#-------------------------------------------------------------------------------
+RELEASE=4
+if test x`echo $VERSION | grep -E $RCEXP` != x; then
+  RELEASE=0.`echo $VERSION | sed 's/.*-rc/rc/'`
+  VERSION=`echo $VERSION | sed 's/-rc.*//'`
+fi
 
 echo "[i] RPM compliant version: $VERSION-$RELEASE"
 
