@@ -897,7 +897,7 @@ private:
                     if (!strncmp(acl_path, restricted_path.c_str(), acl_path_size)) {
                         // Only do prefix checking on full path components.  If acl_path=/foo and
                         // restricted_path=/foobar, then we shouldn't authorize access to /foobar.
-                        if (restricted_path.size() > acl_path_size && restricted_path[acl_path_size-1] != '/') { 
+                        if (restricted_path.size() > acl_path_size && restricted_path[acl_path_size] != '/' && (acl_path_size !=1)) { 
                             continue;
                         }
                         acl_paths.push_back(restricted_path);
