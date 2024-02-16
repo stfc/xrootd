@@ -1,5 +1,4 @@
 
-include(XRootDCommon)
 
 add_library(
   XrdClTestsHelper SHARED
@@ -12,9 +11,12 @@ target_link_libraries(
   XrdClTestsHelper
   ${CMAKE_THREAD_LIBS_INIT}
   ${CPPUNIT_LIBRARIES}
-  ${ZLIB_LIBRARIES}
+  ZLIB::ZLIB
   XrdCl
   XrdUtils)
+
+target_include_directories(
+  XrdClTestsHelper PUBLIC ${CPPUNIT_INCLUDE_DIRS})
 
 add_executable(
   test-runner
@@ -26,6 +28,9 @@ target_link_libraries(
   ${CMAKE_DL_LIBS}
   ${CPPUNIT_LIBRARIES}
   ${CMAKE_THREAD_LIBS_INIT})
+
+target_include_directories(
+  test-runner PRIVATE ${CPPUNIT_INCLUDE_DIRS})
 
 #-------------------------------------------------------------------------------
 # Install

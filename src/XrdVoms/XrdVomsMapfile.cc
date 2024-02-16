@@ -40,7 +40,7 @@
 #include <vector>
 #include <string>
 #include <fcntl.h>
-#include <sys/poll.h>
+#include <poll.h>
 
 bool XrdVomsMapfile::tried_configure = false;
 std::unique_ptr<XrdVomsMapfile> XrdVomsMapfile::mapper;
@@ -194,7 +194,7 @@ XrdVomsMapfile::ParseLine(const std::string &line, std::vector<std::string> &ent
 
 
 std::string
-XrdVomsMapfile::Map(const std::vector<string> &fqan)
+XrdVomsMapfile::Map(const std::vector<std::string> &fqan)
 {
     decltype(m_entries) entries = m_entries;
     if (!entries) {return "";}

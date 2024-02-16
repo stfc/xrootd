@@ -759,9 +759,12 @@ int XrdPssFile::Open(const char *path, int Oflag, mode_t Mode, XrdOucEnv &Env)
 
 // If we are opening this in r/w mode make sure we actually can
 //
-   if (rwMode && (popts & XRDEXP_NOTRW))
-      {if (popts & XRDEXP_FORCERO && !tpcMode) Oflag = O_RDONLY;
-          else return -EROFS;
+   if (rwMode)
+      {if (XrdPssSys::fileOrgn) return -EROFS;
+       if (popts & XRDEXP_NOTRW)
+          {if (popts & XRDEXP_FORCERO && !tpcMode) Oflag = O_RDONLY;
+              else return -EROFS;
+          }
       }
 
 // If this is a third party copy open, then strange rules apply. If this is an
@@ -1355,12 +1358,13 @@ int XrdPssSys::P2URL(char *pbuff, int pblen, XrdPssUrlInfo &uInfo, bool doN2N)
 // Format the header into the buffer and check if we overflowed. Note that we
 // defer substitution of the path as we need to know where the path is.
 //
-   pfxLen = snprintf(pbuff, pblen, hdrData, uInfo.getID(), path);
+   if (fileOrgn) pfxLen = snprintf(pbuff, pblen, hdrData, path);
+      else pfxLen = snprintf(pbuff, pblen, hdrData, uInfo.getID(), path);
    if (pfxLen >= pblen) return -ENAMETOOLONG;
 
 // Add any cgi information
 //
-   if (uInfo.hasCGI())
+   if (!fileOrgn && uInfo.hasCGI())
       {if (!uInfo.addCGI(pbuff, pbuff+pfxLen, pblen-pfxLen))
           return -ENAMETOOLONG;
       }

@@ -1,5 +1,4 @@
 
-include( XRootDCommon )
 
 #-------------------------------------------------------------------------------
 # xrdcopy
@@ -27,7 +26,7 @@ add_executable(
 target_link_libraries(
   xrdsrv-tls
   XrdUtils
-  ${OPENSSL_LIBRARIES}
+  OpenSSL::SSL
   ${CMAKE_THREAD_LIBS_INIT} )
   
 endif()
