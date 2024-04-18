@@ -18,22 +18,14 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	1%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
+Release:	2%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
 URL:		https://xrootd.slac.stanford.edu
 
-%if !%{with git}
 Version:	5.6.9
-Source0:	%{url}/download/v%{version}/%{name}-%{version}.tar.gz
-%else
-%define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
-%define src_version %(sed -e "s/%%(describe)/v5.7-rc%(date +%%Y%%m%%d)/" <<< "%git_version")
-%define rpm_version %(sed -e 's/v//; s/-rc/~rc/; s/-g/+git/; s/-/.post/; s/-/./' <<< "%src_version")
-Version:	%rpm_version
 Source0:	%{name}.tar.gz
-%endif
 
 %if %{with compat}
 Source1:	%{url}/download/v%{compat_version}/%{name}-%{compat_version}.tar.gz
