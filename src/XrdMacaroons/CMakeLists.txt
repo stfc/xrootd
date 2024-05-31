@@ -31,6 +31,8 @@ set(XrdMacaroons XrdMacaroons-${PLUGIN_VERSION})
 add_library(${XrdMacaroons} MODULE
   XrdMacaroons.cc
   XrdMacaroonsAuthz.cc       XrdMacaroonsAuthz.hh
+  XrdMacaroonsGenerate.cc    XrdMacaroonsGenerate.hh
+  XrdMacaroonsUtils.cc       XrdMacaroonsUtils.hh
   XrdMacaroonsConfigure.cc
   XrdMacaroonsHandler.cc     XrdMacaroonsHandler.hh
 )
