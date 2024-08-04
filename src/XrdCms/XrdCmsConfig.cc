@@ -735,6 +735,7 @@ void XrdCmsConfig::ConfigDefaults(void)
    P_load   = 0;
    P_mem    = 0;
    P_pag    = 0;
+   P_randlb = 0;          // SelbyLoad algorithm choice
    AskPerf  = 10;         // Every 10 pings
    AskPing  = 60;         // Every  1 minute
    PingTick = 0;
@@ -752,7 +753,7 @@ void XrdCmsConfig::ConfigDefaults(void)
    DiskOK   = false;      // Does not have any disk
    myPaths  = (char *)""; // Default is 'r /'
    ConfigFN = 0;
-   sched_RR = sched_Pack = sched_AffPC = sched_Level = 0; sched_Force = 1;
+   sched_RR = sched_Pack = sched_AffPC = sched_Level = sched_LoadR = 0; sched_Force = 1;
    isManager= 0;
    isMeta   = 0;
    isPeer   = 0;
@@ -1273,7 +1274,7 @@ char *XrdCmsConfig::setupSid()
   
 void XrdCmsConfig::Usage(int rc)
 {
-cerr <<"\nUsage: cmsd [xrdopts] [-i] [-m] [-s] -c <cfile>" <<endl;
+std::cerr <<"\nUsage: cmsd [xrdopts] [-i] [-m] [-s] -c <cfile>" <<std::endl;
 exit(rc);
 }
   
@@ -2651,7 +2652,8 @@ int XrdCmsConfig::xsched(XrdSysError *eDest, XrdOucStream &CFile)
         {"refreset", -1,  &RefReset},
         {"affinity", -2,  0},
         {"affpath",  -3,  0},
-        {"tryhname",   1, &V_hntry}
+        {"tryhname",   1, &V_hntry},
+	{"randlb",    1, &P_randlb}
        };
     int numopts = sizeof(scopts)/sizeof(struct schedopts);
 
@@ -2725,6 +2727,11 @@ int XrdCmsConfig::xschedm(char *val, XrdSysError *eDest, XrdOucStream &CFile)
 
    if (!strcmp(val, "strict"))
       {sched_Level = 0;
+       return 1;
+      }
+
+   if (!strcmp(val, "randomized"))
+      {sched_LoadR = 1;
        return 1;
       }
 

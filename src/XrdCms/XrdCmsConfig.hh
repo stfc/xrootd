@@ -107,6 +107,7 @@ int         P_io;         // % I/O Capacity in load factor
 int         P_load;       // % MSC Capacity in load factor
 int         P_mem;        // % MEM Capacity in load factor
 int         P_pag;        // % PAG Capacity in load factor
+int         P_randlb;     // enable weighted random load balancing
 
 char        DoMWChk;      // When true (default) perform multiple write check
 char        DoHnTry;      // When true (default) use hostnames for try redirs
@@ -130,6 +131,7 @@ char        sched_Pack;   // 1 -> Pick with affinity (>1 same but wait for resps
 char        sched_AffPC;  // Affinity path component count (-255 <= n <= 255)
 char        sched_Level;  // 1 -> Use load-based level for "pack" selection
 char        sched_Force;  // 1 -> Client cannot select mode
+char        sched_LoadR;  // 1 -> Use randomized load-based weighting for selection
 int         doWait;       // 1 -> Wait for a data end-point
 
 int         adsPort;      // Alternate server port
