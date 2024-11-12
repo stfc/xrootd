@@ -1397,6 +1397,8 @@ int XrdXrootdProtocol::do_Open()
    mode = mapMode(mode) | S_IRUSR | S_IWUSR; usage = 'r';
         if (opts & kXR_open_read)  
            {openopts  = SFS_O_RDONLY;  *op++ = 'r'; opC = XROOTD_MON_OPENR;}
+   else{
+         STATIC_REDIRECT(RD_open2);
    else if (opts & kXR_open_updt)   
            {openopts  = SFS_O_RDWR;    *op++ = 'u'; usage = 'w';
                                                     opC = XROOTD_MON_OPENW;}
@@ -1440,7 +1442,7 @@ int XrdXrootdProtocol::do_Open()
    if (opts & kXR_posc)               {*op++ = 'p'; openopts |= SFS_O_POSC;}
    if (opts & kXR_seqio)              {*op++ = 'S'; openopts |= SFS_O_SEQIO;}
    *op = '\0';
-
+   }
 // Do some tracing, avoid exposing any security token in the URL
 //
    if (TRACING(TRACE_FS))
