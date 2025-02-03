@@ -31,7 +31,7 @@ jobs:
   macos:
     strategy:
       matrix:
-        version: [ 12, 13, 14 ]
+        version: [ 13, 14, 15 ]
       fail-fast: false
 
     name: macOS
@@ -59,7 +59,7 @@ jobs:
       run: ctest -VV --repeat until-pass:3 -S test.cmake
 
     - name: Install with CMake
-      run: cmake --install build
+      run: sudo cmake --install build
 
     - name: Run post-install tests
       run: |
