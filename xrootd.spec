@@ -18,14 +18,14 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	3%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
+Release:	2%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
 URL:		https://xrootd.slac.stanford.edu
 
 %if !%{with git}
-Version:	5.7.2
+Version:	5.7.3
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
@@ -55,6 +55,7 @@ BuildRequires:	cmake
 BuildRequires:	gcc-c++
 %endif
 BuildRequires:	gdb
+BuildRequires:	which
 BuildRequires:	make
 BuildRequires:	pkgconfig
 BuildRequires:	fuse-devel
@@ -947,6 +948,9 @@ fi
 %endif
 
 %changelog
+
+* Tue Jan 28 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.7.3-1
+- XRootD 5.7.3
 
 * Wed Nov 27 2024 Guilherme Amadio <amadio@cern.ch> - 1:5.7.2-1
 - XRootD 5.7.2

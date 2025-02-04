@@ -655,12 +655,12 @@ void Cache::dec_ref_cnt(File* f, bool high_debug)
             char buf[4096];
             int  len = snprintf(buf, 4096, "{\"event\":\"file_close\","
                                  "\"lfn\":\"%s\",\"size\":%lld,\"blk_size\":%d,\"n_blks\":%d,\"n_blks_done\":%d,"
-                                 "\"access_cnt\":%lu,\"attach_t\":%lld,\"detach_t\":%lld,\"remotes\":%s,"
+                                 "\"access_cnt\":%zu,\"attach_t\":%lld,\"detach_t\":%lld,\"remotes\":%s,"
                                  "\"b_hit\":%lld,\"b_miss\":%lld,\"b_bypass\":%lld,"
                                  "\"b_todisk\":%lld,\"b_prefetch\":%lld,\"n_cks_errs\":%d}",
                                  f->GetLocalPath().c_str(), f->GetFileSize(), f->GetBlockSize(),
                                  f->GetNBlocks(), f->GetNDownloadedBlocks(),
-                                 (unsigned long) f->GetAccessCnt(), (long long) as->AttachTime, (long long) as->DetachTime,
+                                 f->GetAccessCnt(), (long long) as->AttachTime, (long long) as->DetachTime,
                                  f->GetRemoteLocations().c_str(),
                                  as->BytesHit, as->BytesMissed, as->BytesBypassed,
                                  st.m_BytesWritten, f->GetPrefetchedBytes(), st.m_NCksumErrors
@@ -944,13 +944,21 @@ long long Cache::DetermineFullFileSize(const std::string &cinfo_fname)
 
    XrdOssDF *infoFile = m_oss->newFile(m_configuration.m_username.c_str());
    XrdOucEnv env;
+   long long ret;
    int res = infoFile->Open(cinfo_fname.c_str(), O_RDONLY, 0600, env);
-   if (res < 0)
-      return res;
-   Info info(m_trace, 0);
-   if ( ! info.Read(infoFile, cinfo_fname.c_str()))
-      return -EBADF;
-   return info.GetFileSize();
+   if (res < 0) {
+      ret = res;
+   } else {
+      Info info(m_trace, 0);
+      if ( ! info.Read(infoFile, cinfo_fname.c_str())) {
+         ret = -EBADF;
+      } else {
+         ret = info.GetFileSize();
+      }
+      infoFile->Close();
+   }
+   delete infoFile;
+   return ret;
 }
 
 //______________________________________________________________________________
@@ -1006,7 +1014,13 @@ int Cache::ConsiderCached(const char *curl)
       auto it = m_active.find(f_name);
       if (it != m_active.end()) {
          file = it->second;
-         inc_ref_cnt(file, false, false);
+         // If the file-open is in progress, `file` is a nullptr
+         // so we cannot increase the reference count.  For now,
+         // simply treat it as if the file open doesn't exist instead
+         // of trying to wait and see if it succeeds.
+         if (file) {
+            inc_ref_cnt(file, false, false);
+         }
       }
    }
    if (file) {
@@ -1115,7 +1129,12 @@ int Cache::Stat(const char *curl, struct stat &sbuff)
       auto it = m_active.find(f_name);
       if (it != m_active.end()) {
          file = it->second;
-         inc_ref_cnt(file, false, false);
+         // If `file` is nullptr, the file-open is in progress; instead
+         // of waiting for the file-open to finish, simply treat it as if
+         // the file-open doesn't exist.
+         if (file) {
+            inc_ref_cnt(file, false, false);
+         }
       }
    }
    if (file) {
