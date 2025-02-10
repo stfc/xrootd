@@ -1392,7 +1392,6 @@ int XrdXrootdProtocol::do_Open()
    mode = (int)ntohs(Request.open.mode);
    opts = (int)ntohs(Request.open.options);
 
-   
 // Map the mode and options
 //
    mode = mapMode(mode) | S_IRUSR | S_IWUSR; usage = 'r';
@@ -1461,26 +1460,20 @@ int XrdXrootdProtocol::do_Open()
 
 // Validate the path/req type and then check if static redirection applies
 //
-   if (doDig)
-     {
-     popt = XROOTDXP_NOLK; opC = 0;
-     }
-   else
-     {
-       int ropt = -1;
-       if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
- 
-       if (Route[RD_open1].Host[rdType])
-          ropt = RPList.Validate(fn);
-       else
-         if (Route[RD_open2].Host[rdType] && ('w' == usage || strchr(op, 'd')))
-           ropt = RD_open2; 
-       if (ropt >= 0)
-         return Response.Send(
-             kXR_redirect, Route[ropt].Port[rdType],
-             Route[ropt].Host[rdType]
-           );
-     }
+   if (doDig) {popt = XROOTDXP_NOLK; opC = 0;}
+   else {int ropt = -1;
+     if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
+     if (Route[RD_open1].Host[rdType])
+       ropt = RPList.Validate(fn);
+     else
+       if (Route[RD_open2].Host[rdType] && ('w' == usage || strchr(op, 'd')))
+         ropt = RD_open2;
+     if (ropt > 0)
+       return Response.Send(
+         kXR_redirect, Route[ropt].Port[rdType],
+         Route[ropt].Host[rdType]
+       );
+   }
 
 // Add the multi-write option if this path supports it
 //
