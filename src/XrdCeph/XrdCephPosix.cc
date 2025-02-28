@@ -54,7 +54,51 @@
 #include "XrdCeph/XrdCephPosix.hh"
 #include "XrdCeph/XrdCephBulkAioRead.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
+#include "XrdCks/XrdCksData.hh"
 
+#include <XrdCks/XrdCksAssist.hh>
+
+//#include "XrdCeph/XrdCephGlobals.hh"
+
+char *ts_rfc3339() {
+
+    std::time_t now = std::time({});
+    char timeString[std::size("yyyy-mm-dd hh:mm:ss")];
+    std::strftime(std::data(timeString), std::size(timeString),
+                  "%F %TZ", std::gmtime(&now));
+    return strdup(timeString);
+}
+
+
+
+using namespace std;
+
+int setXrdCksAttr(const int fd, const char* cstype, const char* ckSumbuf) {
+
+      int rc = -1;
+
+      std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf, time(0));
+
+      rc = ceph_posix_fsetxattr(fd, XrdCksAttrName(cstype).c_str(),
+      attrData.data(), attrData.size(), 0);
+
+      return rc;
+}
+
+
+std::vector<char> checksumData(const char* algName, const int algLen, const char* ckBuf) {
+
+  XrdCksData xd;
+  xd.Set(algName);
+  xd.Set(ckBuf, algLen);
+  xd.fmTime = time(0);
+  xd.csTime = xd.fmTime;
+
+  auto attrData = std::vector<char>( (char *)&xd, ((char *)&xd)+sizeof(xd));
+
+  return attrData;
+
+}
 
 /// small struct for directory listing
 struct DirIterator {
@@ -110,6 +154,13 @@ XrdSysMutex g_init_mutex;
 
 //JW Counter for number of times a given cluster is resolved.
 std::map<unsigned int, unsigned long long> g_idxCntr;
+
+//IJJ: Actions for Adler32 checksum
+extern bool g_calcStreamedAdler32;
+extern bool g_logStreamedAdler32;
+extern bool g_storeStreamedAdler32;
+
+extern FILE *g_cksLogFile;
 
 /// Accessor to next ceph pool index
 /// Note that this is not thread safe, but we do not care
@@ -751,6 +802,9 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
       }
     }
     // At this point, we know either the target file didn't exist, or the ceph_posix_unlink above removed it
+    if (g_calcStreamedAdler32) {
+      fr.adler32 = adler32(0L, Z_NULL, 0);
+    }
     int fd = insertFileRef(fr);
     logwrapper((char*)"File descriptor %d associated to file %s opened in write mode", fd, pathname);
     return fd;
@@ -758,6 +812,20 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
   }
     
 }
+
+
+const char* formatAdler32(unsigned long adler32) {
+
+#define ADLER32_LENGTH 8
+
+  char ckBuf[ADLER32_LENGTH+1];
+  snprintf(ckBuf, ADLER32_LENGTH+1, "%0*lx", ADLER32_LENGTH, adler32);
+  ckBuf[ADLER32_LENGTH] = '\0';
+
+  return (const char*)strdup(ckBuf);
+
+}
+
 
 int ceph_posix_close(int fd) {
   CephFileRef* fr = getFileRef(fd);
@@ -782,6 +850,31 @@ int ceph_posix_close(int fd) {
                fr->asyncWrCompletionCount, fr->asyncWrStartCount, fr->bytesAsyncWritePending,
                fr->asyncRdCompletionCount, fr->asyncRdStartCount, fr->bytesWritten,  fr->maxOffsetWritten,
                fr->longestAsyncWriteTime, fr->longestCallbackInvocation, (lastAsyncAge));
+
+    if (g_calcStreamedAdler32) {
+        const char* adler32str = formatAdler32(fr->adler32);
+  	logwrapper((char*)"ceph_close: Adler32 streamed checksum = %s", adler32str);
+
+      if (g_logStreamedAdler32) {
+        const char *timestamp = ts_rfc3339(); // "2025-02-24 13:09:01+00:00"
+	const char *path = (fr->pool + ":" + fr->name).c_str();
+	const char *cksMode = "streamed";
+	const char *cksType = "adler32";
+	const char *cksValue = adler32str;
+
+  	fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", timestamp, path, cksMode, cksType, cksValue);
+        fflush(g_cksLogFile);
+      }
+
+      if (g_storeStreamedAdler32) {
+        int rc = setXrdCksAttr(fd, "adler32", adler32str);
+
+        if (rc != 0) {
+           logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
+        }
+      }
+    }
+
     deleteFileRef(fd, *fr);
     return 0;
   } else {
@@ -843,6 +936,12 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
     fr->wrcount++;
     fr->bytesWritten+=count;
     if (fr->offset) fr->maxOffsetWritten = std::max(fr->offset - 1, fr->maxOffsetWritten);
+    if (g_calcStreamedAdler32) {
+      fr->adler32 = adler32(fr->adler32, (const Bytef*)buf, count);
+    } else {
+      logwrapper((char*)"ceph_write: g_calcAdler is false!");
+    }
+
     return count;
   } else {
     return -EBADF;
@@ -853,7 +952,8 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
   CephFileRef* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
+    //logwrapper((char*)"ceph_posix_pwrite: for fd %d, count=%d", fd, count);
+
     if ((fr->flags & (O_WRONLY|O_RDWR)) == 0) {
       return -EBADF;
     }
@@ -864,11 +964,17 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     ceph::bufferlist bl;
     bl.append((const char*)buf, count);
     int rc = striper->write(fr->name, bl, count, offset);
+
     if (rc) return rc;
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
     fr->bytesWritten+=count;
     if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
+
+    if (g_calcStreamedAdler32) {
+      fr->adler32 = adler32(fr->adler32, (const Bytef*)buf, count); 
+    }
+
     return count;
   } else {
     return -EBADF;
@@ -913,7 +1019,7 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
     const char *buf = (const char*)aiop->sfsAio.aio_buf;
     size_t offset = aiop->sfsAio.aio_offset;
     // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
+    logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
     if ((fr->flags & (O_WRONLY|O_RDWR)) == 0) {
       return -EBADF;
     }
@@ -943,6 +1049,9 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
     fr->asyncWrStartCount++;
     ::gettimeofday(&fr->lastAsyncSubmission, nullptr);
     fr->bytesAsyncWritePending+=count;
+    if (g_calcStreamedAdler32) {
+      fr->adler32 = adler32(fr->adler32, (const Bytef*)buf, count);
+    }
     return rc;
   } else {
     return -EBADF;
@@ -1548,7 +1657,6 @@ int ceph_posix_unlink(XrdOucEnv* env, const char *pathname) {
   logwrapper((char*)"ceph_posix_unlink : %s", pathname);
   // start the timer
   auto timer_start = std::chrono::steady_clock::now();
-
   // minimal stat : only size and times are filled
   CephFile file = getCephFile(pathname, env);
   libradosstriper::RadosStriper *striper = getRadosStriper(file);
