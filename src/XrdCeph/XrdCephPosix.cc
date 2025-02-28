@@ -28,7 +28,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/errno.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -156,11 +156,11 @@ XrdSysMutex g_init_mutex;
 std::map<unsigned int, unsigned long long> g_idxCntr;
 
 //IJJ: Actions for Adler32 checksum
-extern bool g_calcStreamedAdler32;
-extern bool g_logStreamedAdler32;
-extern bool g_storeStreamedAdler32;
+bool g_calcStreamedAdler32;
+bool g_logStreamedAdler32;
+bool g_storeStreamedAdler32;
 
-extern FILE *g_cksLogFile;
+FILE *g_cksLogFile;
 
 /// Accessor to next ceph pool index
 /// Note that this is not thread safe, but we do not care

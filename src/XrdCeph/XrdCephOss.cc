@@ -128,7 +128,7 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
 
 }
 
-FILE *g_cksLogFile;
+extern FILE *g_cksLogFile;
 
 
 char *ts_rfc3339() {
@@ -178,9 +178,9 @@ XrdCephOss::~XrdCephOss() {
 extern unsigned int g_maxCephPoolIdx;
 extern unsigned int g_cephAioWaitThresh;
 
-bool g_calcStreamedAdler32;
-bool g_storeStreamedAdler32;
-bool g_logStreamedAdler32;
+extern bool g_calcStreamedAdler32;
+extern bool g_storeStreamedAdler32;
+extern bool g_logStreamedAdler32;
 
 
 
