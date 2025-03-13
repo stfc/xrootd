@@ -42,8 +42,6 @@
 #include "XrdCeph/XrdCephOssBufferedFile.hh"
 #include "XrdCeph/XrdCephOssReadVFile.hh"
 
-//#include "XrdCeph/XrdCephGlobals.hh"
-
 XrdVERSIONINFO(XrdOssGetStorageSystem, XrdCephOss);
 
 XrdSysError XrdCephEroute(0);
@@ -127,6 +125,7 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
   return retval;
 
 }
+char *g_cksLogFileName;
 
 extern FILE *g_cksLogFile;
 
@@ -178,9 +177,9 @@ XrdCephOss::~XrdCephOss() {
 extern unsigned int g_maxCephPoolIdx;
 extern unsigned int g_cephAioWaitThresh;
 
-extern bool g_calcStreamedAdler32;
-extern bool g_storeStreamedAdler32;
-extern bool g_logStreamedAdler32;
+bool g_calcStreamedAdler32;
+bool g_storeStreamedAdler32;
+bool g_logStreamedAdler32;
 
 
 
@@ -385,13 +384,8 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
        }
        if (!strcmp(var, "ceph.streamed-cks-adler32")) { // Streaming Adler32 checksum
 
-
-	 char hostname[32];
-	 (void)gethostname(hostname, 31);
-	 Eroute.Emsg("Hostname is ", hostname);
-	 var = Config.GetWord();
+         var = Config.GetWord();
          if (var) {
-
 /*
  * Currently, actions are simply additive:
  *
@@ -422,27 +416,21 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
 	       g_storeStreamedAdler32 = true;
            }
 
-	   if (g_logStreamedAdler32) {
-	       const char *cksLogFilename = "/var/log/xrootd/checksums/checksums.log";
-               g_cksLogFile = fopen(cksLogFilename, "a");
-	       if (NULL == g_cksLogFile) {
-	          g_logStreamedAdler32 = false;
-		  Eroute.Emsg("Config cannot open file for logging checksum values and pathnames: ", cksLogFilename);
-	       } else {
-		  Eroute.Emsg("Opened file for logging checksum values and pathname: ", cksLogFilename);
-	       }
-	   }
          }
        }// "ceph.streamed-cks-adler32"
 
-/*
-       if (!strcmp(var, "ceph.streamed-cks-adler32-log")) {
-	  var = Config.GetWord();
-	  // Test path for being writable after exiting parse loop...
-	  //
-          g_logStreamedAdler32StreamedPath = strdup(var);
-       }
-*/
+       if (!strcmp(var, "ceph.streamed-cks-logfile") ) {
+         var = Config.GetWord();
+	 if (var) { 
+           g_cksLogFileName = strdup(var);
+         } else {
+           const char *defLogFileName = "/tmp/checksums.log"; // To-DO: Move defLogFileName so it can also be used as fallback 
+	                                                      //  when attempt to open specified log file below fails
+           Eroute.Emsg("Config", "Missing value for ceph.streamed-cks-logfile in config file, setting to default = ", defLogFileName);
+	   g_cksLogFileName = strdup(defLogFileName);
+ 	   return 1;
+         }
+       }// "ceph.streamed-cks-logfile"
 
      }
      // Now check if any errors occured during file i/o
@@ -452,6 +440,16 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
                           configfn);
      }
      Config.Close();
+
+     if (g_logStreamedAdler32) {
+       if (NULL == (g_cksLogFile = fopen(g_cksLogFileName, "a"))) {
+         g_logStreamedAdler32 = false;
+         Eroute.Emsg("Config: ", "cannot open file for logging checksum values and pathname", g_cksLogFileName);
+	 return 1;
+       } else {
+	 Eroute.Emsg("Config: ", "Opened file for logging checksum values and pathname: ", g_cksLogFileName);
+       }
+     }
 
    }
    return NoGo;
