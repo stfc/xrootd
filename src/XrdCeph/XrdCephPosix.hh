@@ -39,6 +39,7 @@
 
 #include "XrdSys/XrdSysPthread.hh"
 #include "XrdOuc/XrdOucIOVec.hh"
+#include <zlib.h>
 
 // simple logging for XrdCeph buffering code
 #define XRDCEPHLOGLEVEL 1
@@ -107,6 +108,7 @@ struct CephFile {
   unsigned int nbStripes;
   unsigned long long stripeUnit;
   unsigned long long objectSize;
+
 };
 
 struct CephFileRef : CephFile {
@@ -127,6 +129,9 @@ struct CephFileRef : CephFile {
   ::timeval lastAsyncSubmission;
   double longestAsyncWriteTime;
   double longestCallbackInvocation;
+  uLong adler32;
+  uLong crc32;
+  bool writingData;
 };
 
 #endif // __XRD_CEPH_POSIX__
