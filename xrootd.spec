@@ -453,7 +453,6 @@ make -C %{_builddir}/%{name}-%{compat_version}/build %{?_smp_mflags}
 
 %cmake \
     -DFORCE_ENABLED:BOOL=TRUE \
-    -DUSE_SYSTEM_ISAL:BOOL=TRUE \
     -DENABLE_ASAN:BOOL=%{with asan} \
     -DENABLE_CEPH:BOOL=%{with ceph} \
     -DENABLE_FUSE:BOOL=TRUE \
@@ -807,6 +806,7 @@ fi
 %{_libdir}/libXrdOfsPrepGPI-5.so
 %{_libdir}/libXrdOssCsi-5.so
 %{_libdir}/libXrdOssSIgpfsT-5.so
+%{_libdir}/libXrdOssStats-5.so
 %{_libdir}/libXrdPfc-5.so
 %{_libdir}/libXrdPss-5.so
 %{_libdir}/libXrdSsi-5.so

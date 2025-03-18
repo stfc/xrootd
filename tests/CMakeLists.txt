@@ -18,6 +18,8 @@ add_subdirectory( XrdSsiTests )
 
 add_subdirectory(XrdTpcTests)
 
+add_subdirectory(XrdPfcTests)
+
 if( BUILD_SCITOKENS )
   add_subdirectory( scitokens )
 endif()
@@ -28,3 +30,4 @@ endif()
 
 add_subdirectory( XRootD )
 add_subdirectory( cluster )
+add_subdirectory( stress )

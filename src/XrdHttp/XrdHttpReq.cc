@@ -251,6 +251,11 @@ void XrdHttpReq::parseScitag(const std::string & val) {
     }
   }
   addCgi("scitag.flow", std::to_string(mScitag));
+  if(request == ReqType::rtGET || request == ReqType::rtPUT) {
+    // We specify to the packet marking handle the type of transfer this request is
+    // so the source and destination in the firefly are properly set
+    addCgi("pmark.appname",this->request == ReqType::rtGET ? "http-get" : "http-put");
+  }
 }
 
 int XrdHttpReq::parseFirstLine(char *line, int len) {
@@ -580,7 +585,7 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
     redirdest += buf;
   }
 
-  redirdest += resource.c_str();
+  redirdest += quote(resource.c_str());
   
   // Here we put back the opaque info, if any
   if (vardata) {
@@ -905,6 +910,9 @@ void XrdHttpReq::mapXrdErrorToHttpStatus() {
         break;
       case kXR_InvalidRequest:
         httpStatusCode = 405; httpStatusText = "Method is not allowed";
+        break;
+      case kXR_noserver:
+        httpStatusCode = 502; httpStatusText = "Bad Gateway";
         break;
       case kXR_TimerExpired:
         httpStatusCode = 504; httpStatusText = "Gateway timeout";
@@ -1936,14 +1944,12 @@ XrdHttpReq::PostProcessListing(bool final_) {
 
           free(estr);
         }
-
-        char *estr = escapeXML(e.path.c_str());
-
-        p += e.path + "\">";
-        p += e.path;
-
-        free(estr);
-
+        std::unique_ptr<char, decltype(&free)> estr(escapeXML(e.path.c_str()), &free);
+        p += estr.get();
+        if (e.flags & kXR_isDir) p += "/";
+        p += "\">";
+        p += estr.get();
+        if (e.flags & kXR_isDir) p += "/";
         p += "</a></td></tr>";
 
         stringresp += p;
@@ -2028,13 +2034,11 @@ XrdHttpReq::ReturnGetHeaders() {
   if (!m_digest_header.empty()) {
     responseHeader = m_digest_header;
   }
-  long one;
-  if (filemodtime && XrdOucEnv::Import("XRDPFC", one)) {
+  if (fileflags & kXR_cachersp) {
       if (!responseHeader.empty()) {
         responseHeader += "\r\n";
       }
-      long object_age = time(NULL) - filemodtime;
-      responseHeader += std::string("Age: ") + std::to_string(object_age < 0 ? 0 : object_age);
+    addAgeHeader(responseHeader);
   }
 
   const XrdHttpReadRangeHandler::UserRangeList &uranges = readRangeHandler.ListResolvedRanges();
@@ -2097,6 +2101,12 @@ XrdHttpReq::ReturnGetHeaders() {
     header += "\n";
     header += m_digest_header;
   }
+  if (fileflags & kXR_cachersp) {
+    if (!header.empty()) {
+      header += "\r\n";
+    }
+    addAgeHeader(header);
+  }
 
   if (m_transfer_encoding_chunked && m_trailer_headers) {
     prot->StartChunkedResp(206, NULL, header.c_str(), -1, keepalive);
@@ -2141,6 +2151,7 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
         return -1;
       } else if (reqstate == 0) {
         if (iovN > 0) {
+          std::string response_headers;
 
           // Now parse the stat info
           TRACEI(REQ, "Stat for HEAD " << resource.c_str()
@@ -2156,7 +2167,12 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
           if (m_req_digest.size()) {
             return 0;
           } else {
-            prot->SendSimpleResp(200, NULL, "Accept-Ranges: bytes", NULL, filesize, keepalive);
+            if (fileflags & kXR_cachersp) {
+              addAgeHeader(response_headers);
+              response_headers += "\r\n";
+            }
+            response_headers += "Accept-Ranges: bytes";
+            prot->SendSimpleResp(200, NULL, response_headers.c_str(), NULL, filesize, keepalive);
             return keepalive ? 1 : -1;
           }
         }
@@ -2173,6 +2189,10 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
                 return -1;
           }
           if (!response_headers.empty()) {response_headers += "\r\n";}
+          if (fileflags & kXR_cachersp) {
+            addAgeHeader(response_headers);
+            response_headers += "\r\n";
+          }
           response_headers += "Accept-Ranges: bytes";
           prot->SendSimpleResp(200, NULL, response_headers.c_str(), NULL, filesize, keepalive);
           return keepalive ? 1 : -1;
@@ -2751,6 +2771,11 @@ XrdHttpReq::sendFooterError(const std::string &extra_text) {
   } else {
     TRACEI(REQ, httpStatusCode << ": " << httpStatusText << (extra_text.empty() ? "" : (": " + extra_text)));
   }
+}
+
+void XrdHttpReq::addAgeHeader(std::string &headers) {
+  long object_age = time(NULL) - filemodtime;
+  headers += std::string("Age: ") + std::to_string(object_age < 0 ? 0 : object_age);
 }
 
 void XrdHttpReq::reset() {

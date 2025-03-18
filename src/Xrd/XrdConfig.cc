@@ -59,6 +59,7 @@
 #include "Xrd/XrdInfo.hh"
 #include "Xrd/XrdLink.hh"
 #include "Xrd/XrdLinkCtl.hh"
+#include "Xrd/XrdMonitor.hh"
 #include "Xrd/XrdPoll.hh"
 #include "Xrd/XrdScheduler.hh"
 #include "Xrd/XrdStats.hh"
@@ -264,6 +265,7 @@ XrdConfig::XrdConfig()
    AdminMode= S_IRWXU;
    HomeMode = S_IRWXU;
    Police   = 0;
+   theMon   = 0;
    Net_Opts = XRDNET_KEEPALIVE;
    TLS_Blen = 0;  // Accept OS default (leave Linux autotune in effect)
    TLS_Opts = XRDNET_KEEPALIVE | XRDNET_USETLS;
@@ -309,6 +311,11 @@ XrdConfig::XrdConfig()
    ProtInfo.totalCF  = &totalCF;
 
    XrdNetAddr::SetCache(3*60*60); // Cache address resolutions for 3 hours
+
+   // This may reset the NPROC resource limit, which is done here as we
+   // expect to be operating as a daemon. We set the argument limlower=true
+   // to potentially set a more restrictive limit than the current one.
+   Sched.setNproc(true);
 }
   
 /******************************************************************************/
@@ -1238,7 +1245,7 @@ int XrdConfig::setFDL()
 //
 #if ( defined(__linux__) || defined(__GNU__) || (defined(__FreeBSD_kernel__) && defined(__GLIBC__)) ) && defined(RLIMIT_NPROC)
 
-// Obtain the actual limit now (Scheduler construction sets this to rlim_max)
+// Obtain the actual limit now (Scheduler::setNproc may change this)
 //
    if (getrlimit(RLIMIT_NPROC, &rlim) < 0)
       return Log.Emsg("Config", errno, "get thread limit");
@@ -1390,7 +1397,11 @@ int XrdConfig::Setup(char *dfltp, char *libProt)
 // Now check if we have to setup automatic reporting
 //
    if (repDest[0] != 0 && repOpts) 
-      ProtInfo.Stats->Report(repDest, repInt, repOpts);
+      {ProtInfo.Stats->Report(repDest, repInt, repOpts);
+       theMon = new XrdMonitor;
+       XrdMonRoll* monRoll = new XrdMonRoll(*theMon);
+       theEnv.PutPtr("XrdMonRoll*", monRoll);
+      }
 
 // All done
 //

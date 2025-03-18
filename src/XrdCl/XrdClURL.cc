@@ -26,6 +26,7 @@
 #include "XrdCl/XrdClOptimizers.hh"
 
 #include <cstdlib>
+#include <cctype>
 #include <vector>
 #include <sstream>
 #include <algorithm>
@@ -205,16 +206,12 @@ namespace XrdCl
       {
         pUserName = userPass.substr( 0, pos );
         pPassword = userPass.substr( pos+1 );
-        if( pPassword.empty() )
-          return false;
       }
       //------------------------------------------------------------------------
       // It's just the user name
       //------------------------------------------------------------------------
       else
         pUserName = userPass;
-      if( pUserName.empty() )
-        return false;
     }
 
     //--------------------------------------------------------------------------
@@ -238,13 +235,23 @@ namespace XrdCl
         // Check if we're IPv6 encoded IPv4
         //----------------------------------------------------------------------
         pos = pHostName.find( "." );
-        size_t pos2 = pHostName.find( "[::ffff" );
-        size_t pos3 = pHostName.find( "[::" );
-        if( pos != std::string::npos && pos3 != std::string::npos &&
-            pos2 == std::string::npos )
+        const size_t pos2 = pHostName.find( "[::" );
+        if( pos != std::string::npos && pos2 != std::string::npos )
         {
-          pHostName.erase( 0, 3 );
-          pHostName.erase( pHostName.length()-1, 1 );
+          std::string hl = pHostName;
+          std::transform(hl.begin(), hl.end(), hl.begin(),
+            [](unsigned char c){ return std::tolower(c); });
+          const size_t pos3 = hl.find( "[::ffff:" );
+          if ( pos3 != std::string::npos )
+          {
+            pHostName.erase( 0, 8 );
+            pHostName.erase( pHostName.length()-1, 1 );
+          }
+          else
+          {
+            pHostName.erase( 0, 3 );
+            pHostName.erase( pHostName.length()-1, 1 );
+          }
         }
       }
     }
@@ -271,8 +278,8 @@ namespace XrdCl
     if( !hostPort.empty() )
     {
       char *result;
-      pPort = ::strtol( hostPort.c_str(), &result, 0 );
-      if( *result != 0 )
+      pPort = ::strtol( hostPort.c_str(), &result, 10 );
+      if( *result != '\0' || pPort < 0 || pPort > 65535 )
         return false;
     }
 

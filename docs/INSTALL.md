@@ -142,9 +142,9 @@ For the anxious user, assuming the repository is cloned into the `xrootd`
 directory under the current working directory, the basic workflow is
 
 ```sh
-cmake -S xrootd -B xrootd_build
-cmake --build xrootd_build --parallel
-cmake --install xrootd_build
+cmake -S xrootd -B xrootd/build
+cmake --build xrootd/build --parallel
+cmake --install xrootd/build
 ```
 
 If you'd like to install somewhere other than the default of `/usr/local`,
@@ -174,7 +174,6 @@ the build:
 | `FORCE_ENABLED`    |  FALSE  | Fail CMake configuration if enabled components cannot be built
 | `XRDCL_LIB_ONLY`   |  FALSE  | Build only the client libraries and necessary dependencies
 | `XRDCL_ONLY`       |  FALSE  | Build only the client and necessary dependencies
-| `USE_SYSTEM_ISAL`  |  FALSE  | Use isa-l library installed in the system
 
 ### Running XRootD Tests
 

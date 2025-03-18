@@ -335,6 +335,7 @@ std::unique_ptr<XrdCephBuffer::IXrdCephBufferAlg> XrdCephOssBufferedFile::create
                                                   !m_cephoss->m_useDefaultPreadAlg));
       } else {
             BUFLOG("XrdCephOssBufferedFile: buffer mode needs to be one of aio|io|write-only-io " );
+
             m_xrdOssDF->Close();
             return bufferAlg; // invalid instance;
       }
