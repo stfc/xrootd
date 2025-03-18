@@ -28,7 +28,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <cerrno>
+#include <sys/errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -529,6 +529,7 @@ int checkAndCreateStriper(unsigned int cephPoolIdx, std::string &userAtPool, con
     }
     int rc = g_cluster[cephPoolIdx]->ioctx_create(file.pool.c_str(), *ioctx);
     if (rc != 0) {
+      logwrapper((char*)"checkAndCreateStriper : ioctx_create failed, user@pool = %s", userAtPool.c_str());
       logwrapper((char*)"checkAndCreateStriper : ioctx_create failed, rc = %d", rc);
       cluster->shutdown();
       delete cluster;
@@ -588,8 +589,9 @@ int checkAndCreateStriper(unsigned int cephPoolIdx, std::string &userAtPool, con
       return 0;
     }
     IOCtxDict & ioDict = g_ioCtx[cephPoolIdx];
-    ioDict.emplace(userAtPool, ioctx);
-    sDict.emplace(userAtPool, striper);
+    ioDict.insert(std::pair<std::string, librados::IoCtx*>(userAtPool, ioctx));
+    sDict.insert(std::pair<std::string, libradosstriper::RadosStriper*>
+                 (userAtPool, striper)).first;
   }
   return 1;
 } 
@@ -769,6 +771,9 @@ int ceph_posix_close(int fd) {
       lastAsyncAge = 1.0 * (now.tv_sec - fr->lastAsyncSubmission.tv_sec) 
               + 0.000001 * (now.tv_usec - fr->lastAsyncSubmission.tv_usec);
     }
+    if (fr->bytesWritten > 0){
+      ceph_posix_fremovexattr(fd,"XrdCks.adler32");
+    }
     logwrapper((char*)"ceph_close: closed fd %d for file %s, read ops count %d, write ops count %d, "
                "async write ops %d/%d, async pending write bytes %ld, "
                "async read ops %d/%d, bytes written/max offset %ld/%ld, "
@@ -863,7 +868,7 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
     fr->bytesWritten+=count;
-    if (offset + count) fr->maxOffsetWritten = std::max(uint64_t(offset + count - 1), fr->maxOffsetWritten);
+    if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
     return count;
   } else {
     return -EBADF;
@@ -882,7 +887,7 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
     fr->bytesAsyncWritePending -= awa->nbBytes;
     fr->bytesWritten += awa->nbBytes;
     if (awa->aiop->sfsAio.aio_nbytes)
-      fr->maxOffsetWritten = std::max(fr->maxOffsetWritten, uint64_t(awa->aiop->sfsAio.aio_offset + awa->aiop->sfsAio.aio_nbytes - 1));
+      fr->maxOffsetWritten = std::max(fr->maxOffsetWritten, awa->aiop->sfsAio.aio_offset + awa->aiop->sfsAio.aio_nbytes - 1);
     ::timeval now;
     ::gettimeofday(&now, nullptr);
     double writeTime = 0.000001 * (now.tv_usec - awa->startTime.tv_usec) + 1.0 * (now.tv_sec - awa->startTime.tv_sec);
