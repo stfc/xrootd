@@ -149,8 +149,19 @@ bool XrdNetPMarkFF::Emit(const char *state, const char *cT, const char *eT)
 
    SockStats(ss);
 
-   int n = snprintf(msgBuff, sizeof(msgBuff), ffHdr, state, cT, eT,
+// Note that the supplier of the data is the source. Hence, for put requests
+// the client is designated as the source o/w it is the server. So, on a
+// put request the number of bytes we recived is the number of bytes the
+// source (i.e. client) sent. Note the temlate is "usage: recv sent".
+//
+   int n;
+   if (appName && !strcmp(appName, "http-put"))
+      {n = snprintf(msgBuff, sizeof(msgBuff), ffHdr, state, cT, eT,
+                             ss.bSent, ss.bRecv, ss.msRTT, ss.usRTT);
+      } else {
+       n = snprintf(msgBuff, sizeof(msgBuff), ffHdr, state, cT, eT,
                              ss.bRecv, ss.bSent, ss.msRTT, ss.usRTT);
+      }
 
    if (n + ffTailsz >= (int)sizeof(msgBuff))
       {eDest->Emsg("PMarkFF", "invalid json; msgBuff truncated.");

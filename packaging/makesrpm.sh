@@ -26,6 +26,7 @@ function printHelp()
 SOURCEPATH=$(realpath $(dirname $0)/..)
 OUTPUTPATH="."
 PRINTHELP=0
+RPM_NAME="xrootd-ceph"
 
 while test ${#} -ne 0; do
   if test x${1} = x--help; then
@@ -124,6 +125,11 @@ echo "[i] Working with version: $VERSION"
 # Sanitize version to work with RPMs
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/Versioning/
 #-------------------------------------------------------------------------------
+RELEASE=4
+if test x`echo $VERSION | grep -E $RCEXP` != x; then
+  RELEASE=0.`echo $VERSION | sed 's/.*-rc/rc/'`
+  VERSION=`echo $VERSION | sed 's/-rc.*//'`
+fi
 
 VERSION=${VERSION#v} # remove "v" prefix
 VERSION=${VERSION/-rc/~rc} # release candidates use ~ in RPMs

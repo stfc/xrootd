@@ -333,7 +333,7 @@ namespace XrdCl
 
       uint32_t bodySize = *(uint32_t*)(message.GetBuffer(4));
       Log *log = DefaultEnv::GetLog();
-      log->Dump( XRootDTransportMsg, "[msg: 0x%x] Expecting %d bytes of message "
+      log->Dump( XRootDTransportMsg, "[msg: %p] Expecting %d bytes of message "
                  "body", &message, bodySize );
 
       return XRootDStatus( stOK, suDone );
@@ -418,14 +418,14 @@ namespace XrdCl
     XRootDStatus st = XRootDTransport::UnMarchalStatusMore( message );
     if( !st.IsOK() && st.code == errDataError )
     {
-      log->Error( XRootDTransportMsg, "[msg: 0x%x] %s", &message,
+      log->Error( XRootDTransportMsg, "[msg: %p] %s", &message,
                   st.GetErrorMessage().c_str() );
       return st;
     }
 
     if( !st.IsOK() )
     {
-      log->Error( XRootDTransportMsg, "[msg: 0x%x] Failed to unmarshall status body.",
+      log->Error( XRootDTransportMsg, "[msg: %p] Failed to unmarshall status body.",
                   &message );
       return st;
     }
@@ -764,9 +764,9 @@ namespace XrdCl
     //--------------------------------------------------------------------------
     XrdSysMutexHelper scopedLock( info->mutex );
     uint16_t allocatedSIDs = info->sidManager->GetNumberOfAllocatedSIDs();
-    log->Dump( XRootDTransportMsg, "[%s] Stream inactive since %d seconds, "
+    log->Dump( XRootDTransportMsg, "[%s] Stream inactive since %lld seconds, "
                "TTL: %d, allocated SIDs: %d, open files: %d, bound file objects: %d",
-               info->streamName.c_str(), inactiveTime, ttl, allocatedSIDs,
+               info->streamName.c_str(), (long long) inactiveTime, ttl, allocatedSIDs,
                info->openFiles, info->finstcnt.load( std::memory_order_relaxed ) );
 
     if( info->openFiles != 0 && info->finstcnt.load( std::memory_order_relaxed ) != 0 )
@@ -799,9 +799,9 @@ namespace XrdCl
     const bool anySID =
       info->sidManager->IsAnySIDOldAs( now - streamTimeout );
 
-    log->Dump( XRootDTransportMsg, "[%s] Stream inactive since %d seconds, "
+    log->Dump( XRootDTransportMsg, "[%s] Stream inactive since %lld seconds, "
                "stream timeout: %d, any SID: %d, wait barrier: %s",
-               info->streamName.c_str(), inactiveTime, streamTimeout,
+               info->streamName.c_str(), (long long) inactiveTime, streamTimeout,
                anySID, Utils::TimeToString(info->waitBarrier).c_str() );
 
     if( inactiveTime < streamTimeout )
@@ -1584,7 +1584,7 @@ namespace XrdCl
 
     if( info->sidManager->IsTimedOut( rsp->hdr.streamid ) )
     {
-      log->Error( XRootDTransportMsg, "Message 0x%x, stream [%d, %d] is a "
+      log->Error( XRootDTransportMsg, "Message %p, stream [%d, %d] is a "
                   "response that we're no longer interested in (timed out)",
                   &msg, rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
       //------------------------------------------------------------------------
@@ -1618,7 +1618,7 @@ namespace XrdCl
     {
       seconds = ntohl( rsp->body.waitresp.seconds );
 
-      log->Dump( XRootDMsg, "[%s] Got kXR_waitresp response of %d seconds, "
+      log->Dump( XRootDMsg, "[%s] Got kXR_waitresp response of %u seconds, "
                  "setting up wait barrier.",
                  info->streamName.c_str(),
                  seconds );
@@ -1671,6 +1671,12 @@ namespace XrdCl
                                      uint32_t   bytesSent,
                                      AnyObject &channelData )
   {
+    // Called when a message has been sent. For messages that return on a
+    // different pathid (and hence may use a different poller) it is possible
+    // that the server has already replied and the reply will trigger
+    // MessageReceived() before this method has been called. However for open
+    // and close this is never the case and this method is used for tracking
+    // only those.
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
     XrdSysMutexHelper scopedLock( info->mutex );
@@ -2856,6 +2862,9 @@ namespace XrdCl
 
     if( flags & kXR_attrMeta )
       repr += "meta ";
+
+    else if( flags & kXR_attrCache )
+      repr += "cache ";
 
     else if( flags & kXR_attrProxy )
       repr += "proxy ";

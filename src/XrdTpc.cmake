@@ -25,7 +25,7 @@ if( BUILD_TPC )
   }
   " CURL_PIPELINING
   )
-  set(XRD_COMPILE_DEFS "XRD_CHUNK_RESP")
+
   if ( CURL_PIPELINING )
     set(XRD_COMPILE_DEFS ${XRD_COMPILE_DEFS} "USE_PIPELINING")
   endif ()
@@ -50,9 +50,7 @@ if( BUILD_TPC )
     XrdHttpUtils
     ${CMAKE_DL_LIBS}
     ${CMAKE_THREAD_LIBS_INIT}
-    ${CURL_LIBRARIES} )
-
-  target_include_directories( ${LIB_XRD_TPC} PRIVATE ${CURL_INCLUDE_DIRS} )
+    CURL::libcurl )
 
   if( MacOSX )
     set( TPC_LINK_FLAGS, "-Wl" )

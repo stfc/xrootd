@@ -32,6 +32,10 @@ enum LogMask {
     All     = 0xff
 };
 
+enum class TpcType {
+  Pull,
+  Push
+};
 
 struct CurlDeleter {
     void operator()(CURL *curl);
@@ -48,7 +52,7 @@ public:
     virtual int ProcessReq(XrdHttpExtReq &req);
     // Abstract method in the base class, but does not seem to be used
     virtual int Init(const char *cfgfile) {return 0;}
-
+    static constexpr std::string_view OSS_TASK_OPAQUE = "oss.task=httptpc";
 private:
 
     static int sockopt_callback(void * clientp, curl_socket_t curlfd, curlsocktype purpose);
@@ -60,8 +64,8 @@ private:
 
     struct TPCLogRecord {
 
-        TPCLogRecord(XrdHttpExtReq & req) : bytes_transferred( -1 ), status( -1 ),
-                         tpc_status(-1), streams( 1 ), isIPv6(false), mReq(req), pmarkManager(mReq)
+        TPCLogRecord(XrdHttpExtReq & req, const TpcType tpcType) : bytes_transferred( -1 ), status( -1 ),
+                         tpc_status(-1), streams( 1 ), isIPv6(false), mReq(req), pmarkManager(mReq,tpcType), mTpcType(tpcType)
         {
          gettimeofday(&begT, 0); // Set effective start time
         }
@@ -82,6 +86,7 @@ private:
         XrdHttpExtReq & mReq;
         XrdTpc::PMarkManager pmarkManager;
         XrdSysError * m_log;
+        TpcType mTpcType;
     };
 
     int ProcessOptionsReq(XrdHttpExtReq &req);
@@ -100,7 +105,6 @@ private:
                       int openMode, const XrdSecEntity &sec,
                       const std::string &authz);
 
-#ifdef XRD_CHUNK_RESP
     int DetermineXferSize(CURL *curl, XrdHttpExtReq &req, TPC::State &state,
                           bool &success, TPCLogRecord &, bool shouldReturnErrorToClient = true);
 
@@ -125,10 +129,6 @@ private:
                            size_t streams, std::vector<TPC::State*> &streams_handles,
                            std::vector<ManagedCurlHandle> &curl_handles,
                            TPCLogRecord &rec);
-#else
-    int RunCurlBasic(CURL *curl, XrdHttpExtReq &req, TPC::State &state,
-                     TPCLogRecord &rec);
-#endif
 
     int ProcessPushReq(const std::string & resource, XrdHttpExtReq &req);
     int ProcessPullReq(const std::string &resource, XrdHttpExtReq &req);
@@ -144,7 +144,6 @@ private:
 
     std::string generateClientErr(std::stringstream &err_ss, const TPCLogRecord &rec, CURLcode cCode = CURLcode::CURLE_OK);
 
-    std::string prepareURL(XrdHttpExtReq &req, bool & hasSetOpaque);
     std::string prepareURL(XrdHttpExtReq &req);
 
     static int m_marker_period;

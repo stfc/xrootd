@@ -1424,7 +1424,8 @@ int XrdXrootdProtocol::do_Open()
            }
    else if (opts & kXR_delete)
            {openopts  = SFS_O_TRUNC;   *op++ = 'd'; opC = XROOTD_MON_OPENW;
-            if (opts & kXR_mkdir)     {*op++ = 'm';
+            if (opts & (kXR_mkpath | kXR_async))
+                                      {*op++ = 'm';
                                        mode |= SFS_O_MKPTH;
                                       }
            }
@@ -1458,15 +1459,22 @@ int XrdXrootdProtocol::do_Open()
 //
    doDig = (digFS && SFS_LCLPATH(fn));
 
-// Validate the path and then check if static redirection applies
+// Validate the path/req type and then check if static redirection applies
 //
    if (doDig) {popt = XROOTDXP_NOLK; opC = 0;}
-      else {int ropt;
-            if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
-            if (Route[RD_open1].Host[rdType] && (ropt = RPList.Validate(fn)))
-               return Response.Send(kXR_redirect, Route[ropt].Port[rdType],
-                                                  Route[ropt].Host[rdType]);
-           }
+   else {int ropt = -1;
+     if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
+     if (Route[RD_open1].Host[rdType])
+       ropt = RPList.Validate(fn);
+     else
+       if (Route[RD_write].Host[rdType] && ('w' == usage || strchr(op, 'd')))
+         ropt = RD_write;
+     if (ropt > 0)
+       return Response.Send(
+         kXR_redirect, Route[ropt].Port[rdType],
+         Route[ropt].Host[rdType]
+       );
+   }
 
 // Add the multi-write option if this path supports it
 //
@@ -2504,7 +2512,7 @@ int XrdXrootdProtocol::do_ReadNone(int &retc, int &pathID)
    XrdXrootdFHandle fh;
    int ralsz = Request.header.dlen;
    struct read_args *rargs=(struct read_args *)(argp->buff);
-   struct readahead_list *ralsp = (readahead_list *)(rargs+sizeof(read_args));
+   struct readahead_list *ralsp = (readahead_list *)(rargs+1);
 
 // Return the pathid
 //
@@ -3379,6 +3387,7 @@ int XrdXrootdProtocol::do_WriteSpan()
    if (Monitor.InOut())
       Monitor.Agent->Add_wr(IO.File->Stats.FileID, Request.write.dlen,
                                                   Request.write.offset);
+   IO.File->Stats.wrOps(IO.IOLen); // Optimistically correct
 
 // Trace this entry
 //

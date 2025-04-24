@@ -18,14 +18,14 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	1%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
+Release:	99%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
 URL:		https://xrootd.slac.stanford.edu
 
 %if !%{with git}
-Version:	5.7.1
+Version:	5.7.3
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
@@ -55,6 +55,7 @@ BuildRequires:	cmake
 BuildRequires:	gcc-c++
 %endif
 BuildRequires:	gdb
+BuildRequires:	which
 BuildRequires:	make
 BuildRequires:	pkgconfig
 BuildRequires:	fuse-devel
@@ -319,12 +320,12 @@ xrdcl-http is an XRootD client plugin which allows XRootD to interact
 with HTTP repositories.
 
 %if %{with ceph}
-%package ceph
+%package ceph-buffered
 Summary:	XRootD plugin for interfacing with the Ceph storage platform
 Group:		System Environment/Libraries
 Requires:	%{name}-libs%{?_isa} = %{epoch}:%{version}-%{release}
 
-%description ceph
+%description ceph-buffered
 The xrootd-ceph is an OSS layer plugin for the XRootD server for
 interfacing with the Ceph storage platform.
 %endif
@@ -452,7 +453,6 @@ make -C %{_builddir}/%{name}-%{compat_version}/build %{?_smp_mflags}
 
 %cmake \
     -DFORCE_ENABLED:BOOL=TRUE \
-    -DUSE_SYSTEM_ISAL:BOOL=TRUE \
     -DENABLE_ASAN:BOOL=%{with asan} \
     -DENABLE_CEPH:BOOL=%{with ceph} \
     -DENABLE_FUSE:BOOL=TRUE \
@@ -806,6 +806,7 @@ fi
 %{_libdir}/libXrdOfsPrepGPI-5.so
 %{_libdir}/libXrdOssCsi-5.so
 %{_libdir}/libXrdOssSIgpfsT-5.so
+%{_libdir}/libXrdOssStats-5.so
 %{_libdir}/libXrdPfc-5.so
 %{_libdir}/libXrdPss-5.so
 %{_libdir}/libXrdSsi-5.so
@@ -870,7 +871,7 @@ fi
 %config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/xrdcl-http-plugin.conf
 
 %if %{with ceph}
-%files ceph
+%files ceph-buffered
 %{_libdir}/libXrdCeph-5.so
 %{_libdir}/libXrdCephXattr-5.so
 %{_libdir}/libXrdCephPosix.so.*
@@ -947,6 +948,12 @@ fi
 %endif
 
 %changelog
+
+* Tue Jan 28 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.7.3-1
+- XRootD 5.7.3
+
+* Wed Nov 27 2024 Guilherme Amadio <amadio@cern.ch> - 1:5.7.2-1
+- XRootD 5.7.2
 
 * Mon Sep 02 2024 Guilherme Amadio <amadio@cern.ch> - 1:5.7.1-1
 - XRootD 5.7.1

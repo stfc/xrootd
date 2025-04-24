@@ -57,7 +57,7 @@ TPCHandler::TPCLogRecord::~TPCLogRecord()
        monInfo.begT = begT;
        gettimeofday(&monInfo.endT, 0);
 
-       if (log_prefix == "PullRequest")
+       if (mTpcType == TpcType::Pull)
           {monInfo.dstURL = local.c_str();
            monInfo.srcURL = remote.c_str();
           } else {
@@ -158,25 +158,10 @@ int TPCHandler::closesocket_callback(void *clientp, curl_socket_t fd) {
 /******************************************************************************/
 /*                            p r e p a r e U R L                             */
 /******************************************************************************/
-  
-// We need to utilize the full URL (including the query string), not just the
-// resource name.  The query portion is hidden in the `xrd-http-query` header;
-// we take this out and combine it with the resource name.
-// We also append the value of the headers configured in tpc.header2cgi to the resource full URL
-//
-// One special key is `authz`; this is always stripped out and copied to the Authorization
-// header (which will later be used for XrdSecEntity).  The latter copy is only done if
-// the Authorization header is not already present.
-//
-// hasSetOpaque will be set to true if at least one opaque data has been set in the URL that is returned,
-// false otherwise
-std::string TPCHandler::prepareURL(XrdHttpExtReq &req, bool & hasSetOpaque) {
-  return XrdTpcUtils::prepareOpenURL(req.resource, req.headers,hdr2cgimap,hasSetOpaque);
-}
 
+// See XrdTpcUtils::prepareOpenURL() documentation
 std::string TPCHandler::prepareURL(XrdHttpExtReq &req) {
-    bool foundHeader;
-    return prepareURL(req,foundHeader);
+  return XrdTpcUtils::prepareOpenURL(req.resource, req.headers,hdr2cgimap);
 }
 
 /******************************************************************************/
@@ -427,11 +412,8 @@ int TPCHandler::OpenWaitStall(XrdSfsFile &fh, const std::string &resource,
 }
 
 /******************************************************************************/
-/* XRD_CHUNK_RESP:                                                            */
 /*         T P C H a n d l e r : : D e t e r m i n e X f e r S i z e          */
 /******************************************************************************/
-  
-#ifdef XRD_CHUNK_RESP
 
 
 
@@ -442,14 +424,18 @@ int TPCHandler::DetermineXferSize(CURL *curl, XrdHttpExtReq &req, State &state,
                                   bool &success, TPCLogRecord &rec, bool shouldReturnErrorToClient) {
     success = false;
     curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
+    // Set a custom timeout of 60 seconds (= CONNECT_TIMEOUT for convenience) for the HEAD request
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, CONNECT_TIMEOUT);
     CURLcode res;
     res = curl_easy_perform(curl);
     //Immediately set the CURLOPT_NOBODY flag to 0 as we anyway
     //don't want the next curl call to do be a HEAD request
     curl_easy_setopt(curl, CURLOPT_NOBODY, 0);
+    // Reset the CURLOPT_TIMEOUT to no timeout (default)
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     if (res == CURLE_HTTP_RETURNED_ERROR) {
         std::stringstream ss;
-        ss << "Remote server failed request";
+        ss << "Remote server failed request while fetching remote size";
         std::stringstream ss2;
         ss2 << ss.str() << ": " << curl_easy_strerror(res);
         rec.status = 500;
@@ -457,13 +443,13 @@ int TPCHandler::DetermineXferSize(CURL *curl, XrdHttpExtReq &req, State &state,
         return shouldReturnErrorToClient ? req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec, res).c_str(), 0) : -1;
     } else if (state.GetStatusCode() >= 400) {
         std::stringstream ss;
-        ss << "Remote side " << req.clienthost << " failed with status code " << state.GetStatusCode();
+        ss << "Remote side " << req.clienthost << " failed with status code " << state.GetStatusCode() << " while fetching remote size";
         rec.status = 500;
         logTransferEvent(LogMask::Error, rec, "SIZE_FAIL", ss.str());
         return shouldReturnErrorToClient ? req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec).c_str(), 0) : -1;
     } else if (res) {
         std::stringstream ss;
-        ss << "Internal transfer failure";
+        ss << "Internal transfer failure while fetching remote size";
         std::stringstream ss2;
         ss2 << ss.str() << " - HTTP library failed: " << curl_easy_strerror(res);
         rec.status = 500;
@@ -484,8 +470,8 @@ int TPCHandler::GetContentLengthTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t
     //it will fail
     state.CopyHeaders(req);
     int result;
-    //In case we cannot get the content length, we don't return anything to the client
-    if ((result = DetermineXferSize(curl, req, state, success, rec, false)) || !success) {
+    //In case we cannot get the content length, we return the error to the client
+    if ((result = DetermineXferSize(curl, req, state, success, rec)) || !success) {
         return result;
     }
     contentLength = state.GetContentLength();
@@ -493,7 +479,6 @@ int TPCHandler::GetContentLengthTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t
 }
   
 /******************************************************************************/
-/* XRD_CHUNK_RESP:                                                            */
 /*            T P C H a n d l e r : : S e n d P e r f M a r k e r             */
 /******************************************************************************/
   
@@ -518,7 +503,6 @@ int TPCHandler::SendPerfMarker(XrdHttpExtReq &req, TPCLogRecord &rec, TPC::State
 }
 
 /******************************************************************************/
-/* XRD_CHUNK_RESP:                                                            */
 /*            T P C H a n d l e r : : S e n d P e r f M a r k e r             */
 /******************************************************************************/
   
@@ -567,7 +551,6 @@ int TPCHandler::SendPerfMarker(XrdHttpExtReq &req, TPCLogRecord &rec, std::vecto
 }
 
 /******************************************************************************/
-/* XRD_CHUNK_RESP:                                                            */
 /*        T P C H a n d l e r : : R u n C u r l W i t h U p d a t e s         */
 /******************************************************************************/
   
@@ -795,54 +778,11 @@ int TPCHandler::RunCurlWithUpdates(CURL *curl, XrdHttpExtReq &req, State &state,
 }
 
 /******************************************************************************/
-/* !XRD_CHUNK_RESP:                                                           */
-/*              T P C H a n d l e r : : R u n C u r l B a s i c               */
-/******************************************************************************/
-  
-#else
-int TPCHandler::RunCurlBasic(CURL *curl, XrdHttpExtReq &req, State &state,
-                             TPCLogRecord &rec) {
-    const char *log_prefix = rec.log_prefix.c_str();
-    CURLcode res;
-    res = curl_easy_perform(curl);
-    state.Flush();
-    state.Finalize();
-    if (state.GetErrorCode()) {
-        std::string err = state.GetErrorMessage();
-        if (err.empty()) {err = "(no error message provided)";}
-        else {std::replace(err.begin(), err.end(), '\n', ' ');}
-        std::stringstream ss2;
-        ss2 << "Error when interacting with local filesystem: " << err;
-        logTransferEvent(LogMask::Error, rec, "TRANSFER_FAIL", ss2.str());
-        ss << "failure: " << ss2.str();
-    } else if (res == CURLE_HTTP_RETURNED_ERROR) {
-        m_log.Emsg(log_prefix, "Remote server failed request", curl_easy_strerror(res));
-        return req.SendSimpleResp(500, NULL, NULL,
-                                  const_cast<char *>(curl_easy_strerror(res)), 0);
-    } else if (state.GetStatusCode() >= 400) {
-        std::stringstream ss;
-        ss << "Remote side failed with status code " << state.GetStatusCode();
-        m_log.Emsg(log_prefix, "Remote server failed request", ss.str().c_str());
-        return req.SendSimpleResp(500, NULL, NULL,
-                                  const_cast<char *>(ss.str().c_str()), 0);
-    } else if (res) {
-        m_log.Emsg(log_prefix, "Curl failed", curl_easy_strerror(res));
-        char msg[] = "Unknown internal transfer failure";
-        return req.SendSimpleResp(500, NULL, NULL, msg, 0);
-    } else {
-        char msg[] = "Created";
-        rec.status = 0;
-        return req.SendSimpleResp(201, NULL, NULL, msg, 0);
-    }
-}
-#endif
-
-/******************************************************************************/
 /*            T P C H a n d l e r : : P r o c e s s P u s h R e q             */
 /******************************************************************************/
   
 int TPCHandler::ProcessPushReq(const std::string & resource, XrdHttpExtReq &req) {
-    TPCLogRecord rec(req);
+    TPCLogRecord rec(req, TpcType::Push);
     rec.log_prefix = "PushRequest";
     rec.local = req.resource;
     rec.remote = resource;
@@ -919,11 +859,7 @@ int TPCHandler::ProcessPushReq(const std::string & resource, XrdHttpExtReq &req)
     State state(0, stream, curl, true, req.tpcForwardCreds);
     state.CopyHeaders(req);
 
-#ifdef XRD_CHUNK_RESP
     return RunCurlWithUpdates(curl, req, state, rec);
-#else
-    return RunCurlBasic(curl, req, state, rec);
-#endif
 }
 
 /******************************************************************************/
@@ -931,7 +867,7 @@ int TPCHandler::ProcessPushReq(const std::string & resource, XrdHttpExtReq &req)
 /******************************************************************************/
   
 int TPCHandler::ProcessPullReq(const std::string &resource, XrdHttpExtReq &req) {
-    TPCLogRecord rec(req);
+    TPCLogRecord rec(req,TpcType::Pull);
     rec.log_prefix = "PullRequest";
     rec.local = req.resource;
     rec.remote = resource;
@@ -1030,26 +966,26 @@ int TPCHandler::ProcessPullReq(const std::string &resource, XrdHttpExtReq &req) 
         }
     }
     rec.streams = streams;
-    bool hasSetOpaque = false;
-    std::string full_url = prepareURL(req, hasSetOpaque);
+    std::string full_url = prepareURL(req);
     std::string authz = GetAuthz(req);
     curl_easy_setopt(curl, CURLOPT_URL, resource.c_str());
     ConfigureCurlCA(curl);
-#ifdef XRD_CHUNK_RESP
+    uint64_t sourceFileContentLength = 0;
     {
         //Get the content-length of the source file and pass it to the OSS layer
         //during the open
-        uint64_t sourceFileContentLength = 0;
         bool success;
         GetContentLengthTPCPull(curl, req, sourceFileContentLength, success, rec);
         if(success) {
             //In the case we cannot get the information from the source server (offline or other error)
             //we just don't add the size information to the opaque of the local file to open
-            full_url += hasSetOpaque ? "&" : "?";
-            full_url += "oss.asize=" + std::to_string(sourceFileContentLength);
+            full_url += "&oss.asize=" + std::to_string(sourceFileContentLength);
+        } else {
+          // In the case the GetContentLength is not successful, an error will be returned to the client
+          // just exit here so we don't open the file!
+          return 0;
         }
     }
-#endif
     int open_result = OpenWaitStall(*fh, full_url, mode|SFS_O_WRONLY,
                                     0644 | SFS_O_MKPTH,
                                     req.GetSecEntity(), authz);
@@ -1074,16 +1010,13 @@ int TPCHandler::ProcessPullReq(const std::string &resource, XrdHttpExtReq &req) 
     Stream stream(std::move(fh), streams * m_pipelining_multiplier, streams > 1 ? m_block_size : m_small_block_size, m_log);
     State state(0, stream, curl, false, req.tpcForwardCreds);
     state.CopyHeaders(req);
+    state.SetContentLength(sourceFileContentLength);
 
-#ifdef XRD_CHUNK_RESP
     if (streams > 1) {
         return RunCurlWithStreams(req, state, streams, rec);
     } else {
         return RunCurlWithUpdates(curl, req, state, rec);
     }
-#else
-    return RunCurlBasic(curl, req, state, rec);
-#endif
 }
 
 /******************************************************************************/

@@ -106,6 +106,7 @@ int XrdHttpProtocol::exthandlercnt = 0;
 std::map< std::string, std::string > XrdHttpProtocol::hdr2cgimap; 
 
 bool XrdHttpProtocol::usingEC = false;
+bool XrdHttpProtocol::hasCache= false;
 
 XrdScheduler *XrdHttpProtocol::Sched = 0; // System scheduler
 XrdBuffManager *XrdHttpProtocol::BPool = 0; // Buffer manager
@@ -118,6 +119,9 @@ XrdNetPMark * XrdHttpProtocol::pmarkHandle = nullptr;
 XrdHttpChecksumHandler XrdHttpProtocol::cksumHandler = XrdHttpChecksumHandler();
 XrdHttpReadRangeHandler::Configuration XrdHttpProtocol::ReadRangeConfig;
 bool XrdHttpProtocol::tpcForwardCreds = false;
+
+decltype(XrdHttpProtocol::m_staticheader_map) XrdHttpProtocol::m_staticheader_map;
+decltype(XrdHttpProtocol::m_staticheaders) XrdHttpProtocol::m_staticheaders;
 
 XrdSysTrace XrdHttpTrace("http");
 
@@ -618,11 +622,11 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
 
     // Read as many lines as possible into the buffer. An empty line breaks
     while ((rc = BuffgetLine(tmpline)) > 0) {
+      std::string traceLine = tmpline.c_str();
       if (TRACING(TRACE_DEBUG)) {
-        std::string traceLine{tmpline.c_str()};
         traceLine = obfuscateAuth(traceLine);
-        TRACE(DEBUG, " rc:" << rc << " got hdr line: " << traceLine);
       }
+      TRACE(DEBUG, " rc:" << rc << " got hdr line: " << traceLine);
       if ((rc == 2) && (tmpline.length() > 1) && (tmpline[rc - 1] == '\n')) {
         CurrentReq.headerok = true;
         TRACE(DEBUG, " rc:" << rc << " detected header end.");
@@ -631,7 +635,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
 
 
       if (CurrentReq.request == CurrentReq.rtUnset) {
-        TRACE(DEBUG, " Parsing first line: " << tmpline.c_str());
+        TRACE(DEBUG, " Parsing first line: " << traceLine.c_str());
         int result = CurrentReq.parseFirstLine((char *)tmpline.c_str(), rc);
         if (result < 0) {
           TRACE(DEBUG, " Parsing of first line failed with " << result);
@@ -1074,6 +1078,7 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
       else if TS_Xeq("listingredir", xlistredir);
       else if TS_Xeq("staticredir", xstaticredir);
       else if TS_Xeq("staticpreload", xstaticpreload);
+      else if TS_Xeq("staticheader", xstaticheader);
       else if TS_Xeq("listingdeny", xlistdeny);
       else if TS_Xeq("header2cgi", xheader2cgi);
       else if TS_Xeq("httpsmode", xhttpsmode);
@@ -1106,6 +1111,32 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
 
 // Test if XrdEC is loaded
    if (getenv("XRDCL_EC")) usingEC = true;
+
+// Pre-compute the static headers
+//
+  const auto default_verb = m_staticheader_map.find("");
+  std::string default_static_headers;
+  if (default_verb != m_staticheader_map.end()) {
+    for (const auto &header_entry : default_verb->second) {
+      default_static_headers += header_entry.first + ": " + header_entry.second + "\r\n";
+    }
+  }
+  m_staticheaders[""] = default_static_headers;
+  for (const auto &item : m_staticheader_map) {
+    if (item.first.empty()) {
+      continue; // Skip default case; already handled
+    }
+    auto headers = default_static_headers;
+    for (const auto &header_entry : item.second) {
+      headers += header_entry.first + ": " + header_entry.second + "\r\n";
+    }
+
+    m_staticheaders[item.first] = headers;
+  }
+
+// Test if this is a caching server
+//
+   if (myEnv->Get("XrdCache")) hasCache = true;
 
 // If https was disabled, then issue a warning message if xrdtls configured
 // of it's disabled because httpsmode was auto and xrdtls was not configured.
@@ -1592,6 +1623,13 @@ int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *hea
     ss << "Connection: Close" << crlf;
 
   ss << "Server: XrootD/" << XrdVSTRING << crlf;
+
+  const auto iter = m_staticheaders.find(CurrentReq.requestverb);
+  if (iter != m_staticheaders.end()) {
+    ss << iter->second;
+  } else {
+    ss << m_staticheaders[""];
+  }
   
   if ((bodylen >= 0) && (code != 100))
     ss << "Content-Length: " << bodylen << crlf;
@@ -2239,20 +2277,31 @@ int XrdHttpProtocol::xsecretkey(XrdOucStream & Config) {
   if (val[0] == '/') {
     struct stat st;
     inFile = true;
-    if ( stat(val, &st) ) {
-      eDest.Emsg("Config", errno, "stat shared secret key file", val);
+    int fd = open(val, O_RDONLY);
+
+    if ( fd == -1 ) {
+      eDest.Emsg("Config", errno, "open shared secret key file", val);
+      return 1;
+    }
+
+    if ( fstat(fd, &st) != 0 ) {
+      eDest.Emsg("Config", errno, "fstat shared secret key file", val);
+      close(fd);
       return 1;
     }
 
     if ( st.st_mode & S_IWOTH & S_IWGRP & S_IROTH) {
-      eDest.Emsg("Config", "For your own security, the shared secret key file cannot be world readable or group writable'", val, "'");
+      eDest.Emsg("Config",
+        "For your own security, the shared secret key file cannot be world readable or group writable '", val, "'");
+      close(fd);
       return 1;
     }
 
-    FILE *fp = fopen(val,"r");
+    FILE *fp = fdopen(fd, "r");
 
-    if( fp == NULL ) {
-      eDest.Emsg("Config", errno, "open shared secret key file", val);
+    if ( fp == nullptr ) {
+      eDest.Emsg("Config", errno, "fdopen shared secret key file", val);
+      close(fd);
       return 1;
     }
 
@@ -2531,6 +2580,71 @@ int XrdHttpProtocol::xstaticpreload(XrdOucStream & Config) {
   staticpreload->Rep((const char *)key, nfo);
   return 0;
 }
+
+/******************************************************************************/
+/*                             x s t a t i c h e a d e r                      */
+/******************************************************************************/
+
+//
+// xstaticheader parses the http.staticheader director with the following syntax:
+//
+// http.staticheader [-verb=[GET|HEAD|...]]* header [value]
+//
+// When set, this will cause XrdHttp to always return the specified header and
+// value.
+//
+// Setting this option multiple times is additive (multiple headers may be set).
+// Omitting the value will cause the static header setting to be unset.
+//
+// Omitting the -verb argument will cause it the header to be set unconditionally
+// for all requests.
+int XrdHttpProtocol::xstaticheader(XrdOucStream & Config) {
+  auto val = Config.GetWord();
+  std::vector<std::string> verbs;
+  while (true) {
+    if (!val || !val[0]) {
+      eDest.Emsg("Config", "http.staticheader requires the header to be specified");
+      return 1;
+    }
+
+    std::string match_verb;
+    std::string_view val_str(val);
+    if (val_str.substr(0, 6) == "-verb=") {
+      verbs.emplace_back(val_str.substr(6));
+    } else if (val_str == "-") {
+      eDest.Emsg("Config", "http.staticheader is ignoring unknown flag: ", val_str.data());
+    } else {
+      break;
+    }
+
+    val = Config.GetWord();
+  }
+  if (verbs.empty()) {
+    verbs.emplace_back();
+  }
+
+  std::string header = val;
+
+  val = Config.GetWord();
+  std::string header_value;
+  if (val && val[0]) {
+    header_value = val;
+  }
+
+  for (const auto &verb : verbs) {
+    auto iter = m_staticheader_map.find(verb);
+    if (iter == m_staticheader_map.end() && !header_value.empty()) {
+      m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
+    } else if (header_value.empty()) {
+      iter->second.clear();
+    } else {
+      iter->second.emplace_back(header, header_value);
+    }
+  }
+
+  return 0;
+}
+
 
 /******************************************************************************/
 /*                          x s e l f h t t p s 2 h t t p                     */

@@ -10,6 +10,11 @@ function assert() {
 	echo "$@"; "$@" || error "command \"$*\" failed";
 }
 
+# $1 is expected_value $2 is received value $3 is the error message
+function assert_eq() {
+  [[ "$1" == "$2" ]] || error "$3: expected $1 but received $2"
+}
+
 function assert_failure() {
 	echo "$@"; "$@" && error "command \"$*\" did not fail";
 }
@@ -47,11 +52,20 @@ export XRD_LOGLEVEL XRD_LOGFILE
 # Reduce default timeouts to catch errors quickly and prevent the test
 # suite from getting stuck waiting for timeouts while running.
 
-: "${XRD_REQUESTTIMEOUT:=2}"
-: "${XRD_STREAMTIMEOUT:=2}"
+: "${XRD_REQUESTTIMEOUT:=10}"
+: "${XRD_STREAMTIMEOUT:=5}"
 : "${XRD_TIMEOUTRESOLUTION:=1}"
 
 export XRD_REQUESTTIMEOUT XRD_STREAMTIMEOUT XRD_TIMEOUTRESOLUTION
+
+# Expose the location of the server logfile to the tests.
+# Allows us to test side-effects that are easily visible through logs
+# but difficult to expose otherwise (the driving case is checking that
+# the OSS layer is called with specific CGI set.
+
+XROOTD_SERVER_LOGFILE="${PWD}/${NAME}/xrootd.log"
+
+export XROOTD_SERVER_LOGFILE
 
 # Source directory is the directory where this script is located
 : "${SOURCE_DIR:="$(realpath "$(dirname "${BASH_SOURCE[0]}")")"}"
@@ -118,6 +132,14 @@ function setup() {
 		teardown "${NAME}"
 		error "failed to start XRootD server"
 	fi
+
+	# Prepare a test environment file -- can be used by other unit tests that
+	# utilize this fixture but don't inherit the shell environment from run()
+	XRD_PORT="$(cconfig -x xrootd -c "${CONF}" 2>&1 | grep xrd.port | tr -cd '0-9')"
+	HOST="root://${HOSTNAME:-localhost}:${XRD_PORT}/"
+	cat > "${LOCAL_DIR}/test_config.sh" << EOF
+HOST=$HOST
+EOF
 }
 
 function run() {
@@ -133,7 +155,7 @@ function run() {
 		error "required function not defined in ${SCRIPT}: test_${NAME}"
 	fi
 
-	test_"${NAME}" || (printlogs && exit 1)
+	(test_"${NAME}") || (printlogs && exit 1)
 }
 
 function teardown() {
@@ -142,7 +164,7 @@ function teardown() {
 	# Kill all processes that created pid files and are still running
 	for PIDFILE in *.pid; do
 		test -s "${PIDFILE}" || continue
-		PID="$(ps -o pid= "$(cat "${PIDFILE}")")"
+		PID="$(ps -o pid= "$(cat "${PIDFILE}")" || true)"
 		if test -n "${PID}"; then
 			kill -s TERM "${PID}"
 		fi

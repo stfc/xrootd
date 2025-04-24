@@ -2,6 +2,7 @@
 #include "XrdAcc/XrdAccAuthorize.hh"
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucGatherConf.hh"
+#include "XrdOuc/XrdOucPrivateUtils.hh"
 #include "XrdSec/XrdSecEntity.hh"
 #include "XrdSec/XrdSecEntityAttr.hh"
 #include "XrdSys/XrdSysLogger.hh"
@@ -385,16 +386,6 @@ public:
     ~XrdAccRules() {}
 
     bool apply(Access_Operation oper, std::string path) {
-      auto is_subdirectory = [](const std::string& dir, const std::string& subdir) {
-        if (subdir.size() < dir.size())
-          return false;
-
-        if (subdir.compare(0, dir.size(), dir, 0, dir.size()) != 0)
-          return false;
-
-        return dir.size() == subdir.size() || subdir[dir.size()] == '/' || dir == "/";
-      };
-
       for (const auto & rule : m_rules) {
         // Skip rules that don't match the current operation
         if (rule.first != oper)
@@ -1066,6 +1057,7 @@ private:
                 xrd_rules.emplace_back(AOP_Mkdir, write_path);
                 xrd_rules.emplace_back(AOP_Rename, write_path);
                 xrd_rules.emplace_back(AOP_Insert, write_path);
+                xrd_rules.emplace_back(AOP_Stat, write_path);
                 xrd_rules.emplace_back(AOP_Update, write_path);
                 xrd_rules.emplace_back(AOP_Stat, write_path);
                 xrd_rules.emplace_back(AOP_Chmod, write_path);

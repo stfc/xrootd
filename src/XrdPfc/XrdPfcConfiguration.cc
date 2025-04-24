@@ -2,6 +2,9 @@
 #include "XrdPfcTrace.hh"
 #include "XrdPfcInfo.hh"
 
+#include "XrdPfcResourceMonitor.hh"
+#include "XrdPfcPurgePin.hh"
+
 #include "XrdOss/XrdOss.hh"
 
 #include "XrdOuc/XrdOucEnv.hh"
@@ -10,10 +13,18 @@
 #include "XrdOuc/XrdOucPinLoader.hh"
 #include "XrdOuc/XrdOuca2x.hh"
 
-#include "XrdOfs/XrdOfsConfigPI.hh"
 #include "XrdVersion.hh"
+#include "XrdOfs/XrdOfsConfigPI.hh"
+#include "XrdSys/XrdSysXAttr.hh"
 
 #include <fcntl.h>
+
+extern XrdSysXAttr *XrdSysXAttrActive;
+
+namespace XrdPfc
+{
+   const char *trace_what_strings[] = {"","error ","warning ","info ","debug ","dump "};
+}
 
 using namespace XrdPfc;
 
@@ -34,6 +45,7 @@ Configuration::Configuration() :
    m_purgeColdFilesAge(-1),
    m_purgeAgeBasedPeriod(10),
    m_accHistorySize(20),
+   m_dirStatsInterval(1500),
    m_dirStatsMaxDepth(-1),
    m_dirStatsStoreDepth(0),
    m_bufferSize(128*1024),
@@ -228,6 +240,59 @@ bool Cache::xdlib(XrdOucStream &Config)
    return true;
 }
 
+/* Function: xplib
+
+   Purpose:  To parse the directive: purgelib <path> [<parms>]
+
+             <path>  the path of the decision library to be used.
+             <parms> optional parameters to be passed.
+
+
+   Output: true upon success or false upon failure.
+ */
+bool Cache::xplib(XrdOucStream &Config)
+{
+   const char*  val;
+
+   std::string libp;
+   if (! (val = Config.GetWord()) || ! val[0])
+   {
+      TRACE(Info," Cache::Config() purgelib not specified; will use LRU for purging files");
+      return true;
+   }
+   else
+   {
+      libp = val;
+   }
+
+   char params[4096];
+   if (val[0])
+      Config.GetRest(params, 4096);
+   else
+      params[0] = 0;
+
+   XrdOucPinLoader* myLib = new XrdOucPinLoader(&m_log, 0, "purgelib",
+                                                libp.c_str());
+
+   PurgePin *(*ep)(XrdSysError&);
+   ep = (PurgePin *(*)(XrdSysError&))myLib->Resolve("XrdPfcGetPurgePin");
+   if (! ep) {myLib->Unload(true); return false; }
+
+   PurgePin * dp = ep(m_log);
+   if (! dp)
+   {
+      TRACE(Error, "Config() purgelib was not able to create a Purge Plugin object?");
+      return false;
+   }
+   m_purge_pin = dp;
+
+   if (params[0])
+      m_purge_pin->ConfigPurgePin(params);
+
+
+   return true;
+}
+
 /* Function: xtrace
 
    Purpose:  To parse the directive: trace <level>
@@ -263,6 +328,76 @@ bool Cache::xtrace(XrdOucStream &Config)
    return false;
 }
 
+// Determine if oss spaces are operational and if they support xattrs.
+bool Cache::test_oss_basics_and_features()
+{
+   static const char *epfx = "test_oss_basics_and_features()";
+
+   const auto &conf = m_configuration;
+   const char *user = conf.m_username.c_str();
+   XrdOucEnv   env;
+
+   auto check_space = [&](const char *space, bool &has_xattr)
+   {
+      std::string fname("__prerun_test_pfc_");
+      fname += space;
+      fname += "_space__";
+      env.Put("oss.cgroup", space);
+
+      int res = m_oss->Create(user, fname.c_str(), 0600, env, XRDOSS_mkpath);
+      if (res != XrdOssOK) {
+         m_log.Emsg(epfx, "Can not create a file on space", space);
+         return false;
+      }
+      XrdOssDF *oss_file = m_oss->newFile(user);
+      res = oss_file->Open(fname.c_str(), O_RDWR, 0600, env);
+      if (res != XrdOssOK) {
+         m_log.Emsg(epfx, "Can not open a file on space", space);
+         return false;
+      }
+      res = oss_file->Write(fname.data(), 0, fname.length());
+      if (res != (int) fname.length()) {
+         m_log.Emsg(epfx, "Can not write into a file on space", space);
+         return false;
+      }
+
+      has_xattr = true;
+      long long fsize = fname.length();
+      res = XrdSysXAttrActive->Set("pfc.fsize", &fsize, sizeof(long long), 0, oss_file->getFD(), 0);
+      if (res != 0) {
+         m_log.Emsg(epfx, "Can not write xattr to a file on space", space);
+         has_xattr = false;
+      }
+
+      oss_file->Close();
+
+      if (has_xattr) {
+         char pfn[4096];
+         m_oss->Lfn2Pfn(fname.c_str(), pfn, 4096);
+         fsize = -1ll;
+         res = XrdSysXAttrActive->Get("pfc.fsize", &fsize, sizeof(long long), pfn);
+         if (res != sizeof(long long) || fsize != (long long) fname.length())
+         {
+            m_log.Emsg(epfx, "Can not read xattr from a file on space", space);
+            has_xattr = false;
+         }
+      }
+
+      res = m_oss->Unlink(fname.c_str());
+      if (res != XrdOssOK) {
+         m_log.Emsg(epfx, "Can not unlink a file on space", space);
+         return false;
+      }
+
+      return true;
+   };
+
+   bool aOK = true;
+   aOK &= check_space(conf.m_data_space.c_str(), m_dataXattr);
+   aOK &= check_space(conf.m_meta_space.c_str(), m_metaXattr);
+
+   return aOK;
+}
 
 //______________________________________________________________________________
 /* Function: Config
@@ -334,6 +469,10 @@ bool Cache::Config(const char *config_filename, const char *parameters)
       {
          retval = xdlib(Config);
       }
+      else if (! strcmp(var,"pfc.purgelib"))
+      {
+         retval = xplib(Config);
+      }
       else if (! strcmp(var,"pfc.trace"))
       {
          retval = xtrace(Config);
@@ -379,9 +518,24 @@ bool Cache::Config(const char *config_filename, const char *parameters)
       return false;
    }
 
+   // Test if OSS is operational, determine optional features.
+   aOK &= test_oss_basics_and_features();
+
    // sets default value for disk usage
    XrdOssVSInfo sP;
    {
+      if (m_configuration.m_meta_space != m_configuration.m_data_space &&
+          m_oss->StatVS(&sP, m_configuration.m_meta_space.c_str(), 1) < 0)
+      {
+         m_log.Emsg("ConfigParameters()", "error obtaining stat info for meta space ", m_configuration.m_meta_space.c_str());
+         return false;
+      }
+      if (m_configuration.m_meta_space != m_configuration.m_data_space && sP.Total < 10ll << 20)
+      {
+         m_log.Emsg("ConfigParameters()", "available data space is less than 10 MB (can be due to a mistake in oss.localroot directive) for space ",
+                    m_configuration.m_meta_space.c_str());
+                    return false;
+      }
       if (m_oss->StatVS(&sP, m_configuration.m_data_space.c_str(), 1) < 0)
       {
          m_log.Emsg("ConfigParameters()", "error obtaining stat info for data space ", m_configuration.m_data_space.c_str());
@@ -419,10 +573,18 @@ bool Cache::Config(const char *config_filename, const char *parameters)
             m_log.Emsg("ConfigParameters()", "pfc.diskusage files should have baseline < nominal < max.");
             aOK = false;
           }
+
+
+         if (aOK && m_configuration.m_fileUsageMax >= m_configuration.m_diskUsageLWM)
+         {
+            m_log.Emsg("ConfigParameters()", "pfc.diskusage files values must be below lowWatermark");
+            aOK = false;
+         }
         }
         else aOK = false;
       }
    }
+
    // sets flush frequency
    if ( ! tmpc.m_flushRaw.empty())
    {
@@ -456,7 +618,6 @@ bool Cache::Config(const char *config_filename, const char *parameters)
    }
    // Setup number of standard-size blocks not released back to the system to 5% of total RAM.
    m_configuration.m_RamKeepStdBlocks = (m_configuration.m_RamAbsAvailable / m_configuration.m_bufferSize + 1) * 5 / 100;
-   
 
    // Set tracing to debug if this is set in environment
    char* cenv = getenv("XRDDEBUG");
@@ -514,8 +675,8 @@ bool Cache::Config(const char *config_filename, const char *parameters)
       if (m_configuration.is_dir_stat_reporting_on())
       {
          loff += snprintf(buff + loff, sizeof(buff) - loff,
-                          "       pfc.dirstats maxdepth %d ((internal: store_depth %d, size_of_dirlist %d, size_of_globlist %d))\n",
-                          m_configuration.m_dirStatsMaxDepth, m_configuration.m_dirStatsStoreDepth,
+                          "       pfc.dirstats interval %d maxdepth %d ((internal: store_depth %d, size_of_dirlist %d, size_of_globlist %d))\n",
+                          m_configuration.m_dirStatsInterval, m_configuration.m_dirStatsMaxDepth, m_configuration.m_dirStatsStoreDepth,
                           (int) m_configuration.m_dirStatsDirs.size(), (int) m_configuration.m_dirStatsDirGlobs.size());
          loff += snprintf(buff + loff, sizeof(buff) - loff, "           dirlist:\n");
          for (std::set<std::string>::iterator i = m_configuration.m_dirStatsDirs.begin(); i != m_configuration.m_dirStatsDirs.end(); ++i)
@@ -552,9 +713,16 @@ bool Cache::Config(const char *config_filename, const char *parameters)
 
    m_gstream = (XrdXrootdGStream*) m_env->GetPtr("pfc.gStream*");
 
-   m_log.Say("Config Proxy File Cache g-stream has", m_gstream ? "" : " NOT", " been configured via xrootd.monitor directive");
+   m_log.Say("       pfc g-stream has", m_gstream ? "" : " NOT", " been configured via xrootd.monitor directive\n");
 
-   m_log.Say("------ Proxy File Cache configuration parsing ", aOK ? "completed" : "failed");
+   // Create the ResourceMonitor and get it ready for starting the main thread function.
+   if (aOK)
+   {
+      m_res_mon = new ResourceMonitor(*m_oss);
+      m_res_mon->init_before_main();
+   }
+
+   m_log.Say("=====> Proxy file cache configuration parsing ", aOK ? "completed" : "failed");
 
    if (ofsCfg) delete ofsCfg;
 
@@ -667,7 +835,32 @@ bool Cache::ConfigParameters(std::string part, XrdOucStream& config, TmpConfigur
       const char *p = 0;
       while ((p = cwg.GetWord()) && cwg.HasLast())
       {
-         if (strcmp(p, "maxdepth") == 0)
+         if (strcmp(p, "interval") == 0)
+         {
+            if (XrdOuca2x::a2i(m_log, "Error getting dirstsat interval", cwg.GetWord(), &m_configuration.m_dirStatsInterval, 0, 7 * 24 * 3600))
+            {
+               return false;
+            }
+            int validIntervals[] = {60, 300, 600, 900, 1800, 3600};
+            int size = sizeof(validIntervals) / sizeof(int);
+            bool match = false;
+            std::string vvl;
+            for (int i = 0; i < size; i++) {
+              if (validIntervals[i] == m_configuration.m_dirStatsInterval) {
+                 match = true;
+                 break;
+              }
+              vvl += std::to_string(validIntervals[i]);
+              if ((i+1) != size) vvl += ", ";
+            }
+
+            if (!match) {
+                m_log.Emsg("Config", "Error: Dirstat interval is not valid. Possible interval values are ", vvl.c_str());
+                return false;
+            }
+
+         }
+         else if (strcmp(p, "maxdepth") == 0)
          {
             if (XrdOuca2x::a2i(m_log, "Error getting maxdepth value", cwg.GetWord(), &m_configuration.m_dirStatsMaxDepth, 0, 16))
             {

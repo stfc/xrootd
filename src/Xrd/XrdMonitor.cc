@@ -28,10 +28,6 @@
 /* specific prior written permission of the institution or contributor.       */
 /******************************************************************************/
 
+#include "Xrd/XrdMonitor.hh"
 #include "Xrd/XrdMonRoll.hh"
 
-/******************************************************************************/
-/*                        S t a t i c   M e m b e r s                         */
-/******************************************************************************/
-  
-RAtomic_uint XrdMonRoll::EOV = {0};

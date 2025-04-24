@@ -55,6 +55,7 @@
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucName2Name.hh"
 #include "XrdOuc/XrdOucPsx.hh"
+#include "XrdOuc/XrdOucPrivateUtils.hh"
 
 #include "XrdPosix/XrdPosixAdmin.hh"
 #include "XrdPosix/XrdPosixCallBack.hh"
@@ -287,7 +288,7 @@ int XrdPosixXrootd::Close(int fildes)
       {if ((ret = fP->Close(Status))) {delete fP; fP = 0;}
           else if (DEBUGON)
                   {std::string eTxt = Status.ToString();
-                   DEBUG(eTxt <<" closing " <<fP->Origin());
+                   DEBUG(eTxt <<" closing " << obfuscateAuth(fP->Origin()));
                   }
       } else {
        ret = true;
@@ -634,7 +635,7 @@ int XrdPosixXrootd::Open(const char *path, int oflags, mode_t mode,
       {XrdPosixGlobals::Stats.Count(XrdPosixGlobals::Stats.X.OpenErrs);
        int rc = XrdPosixMap::Result(Status,XrdPosixGlobals::ecMsg,false);
        if (DEBUGON && rc != -ENOENT && rc != -ELOOP)
-          {DEBUG(XrdPosixGlobals::ecMsg.Msg() <<" open " <<fp->Origin());}
+          {DEBUG(XrdPosixGlobals::ecMsg.Msg() <<" open " << obfuscateAuth(fp->Origin()));}
        delete fp;
        errno = -rc;  // Saved errno across the delete
        return -1;
@@ -1165,6 +1166,7 @@ void XrdPosixXrootd::Seekdir(DIR *dirp, long loc)
 int XrdPosixXrootd::Stat(const char *path, struct stat *buf)
 {
    XrdPosixAdmin admin(path,XrdPosixGlobals::ecMsg);
+   bool cacheChk = false;
 
 // Make sure the admin is OK
 //
@@ -1182,6 +1184,7 @@ int XrdPosixXrootd::Stat(const char *path, struct stat *buf)
       int rc = XrdPosixGlobals::theCache->Stat(statX.path, *buf);
       if (!rc) return 0;
       if (rc < 0) {errno = -rc; return -1;} // does the cache set this???
+      cacheChk = true;
      }
 
 // Issue the stat and verify that all went well
@@ -1190,6 +1193,12 @@ int XrdPosixXrootd::Stat(const char *path, struct stat *buf)
        return EcStat(path, buf, admin);
 
    if (!admin.Stat(*buf)) return -1;
+
+// If we are here and the cache was checked then the file was not in the cache.
+// We informally tell the caller this is the case by setting atime to zero.
+// Normally, atime will never be zero in any other case.
+//
+   if (cacheChk) buf->st_atime = 0;
    return 0;
 }        
 

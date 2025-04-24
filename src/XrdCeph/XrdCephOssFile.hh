@@ -49,17 +49,18 @@
 //! In case one of the two only has a default, it will be applied for both plugins.
 //------------------------------------------------------------------------------
 
-class XrdCephOssFile : public XrdOssDF {
+class XrdCephOssFile : virtual public XrdOssDF {
 
 public:
 
-  XrdCephOssFile(XrdCephOss *cephoss);
+  explicit XrdCephOssFile(XrdCephOss *cephoss);
   virtual ~XrdCephOssFile() {};
   virtual int Open(const char *path, int flags, mode_t mode, XrdOucEnv &env);
   virtual int Close(long long *retsz=0);
   virtual ssize_t Read(off_t offset, size_t blen);
   virtual ssize_t Read(void *buff, off_t offset, size_t blen);
-  virtual int     Read(XrdSfsAio *aiop);
+  virtual int     Read(XrdSfsAio *aoip);
+  virtual ssize_t ReadV(XrdOucIOVec *readV, int n);
   virtual ssize_t ReadRaw(void *, off_t, size_t);
   virtual int Fstat(struct stat *buff);
   virtual ssize_t Write(const void *buff, off_t offset, size_t blen);
@@ -67,7 +68,8 @@ public:
   virtual int Fsync(void);
   virtual int Ftruncate(unsigned long long);
 
-private:
+  inline virtual int getFileDescriptor() const {return m_fd;}
+protected:
 
   int m_fd;
   XrdCephOss *m_cephOss;

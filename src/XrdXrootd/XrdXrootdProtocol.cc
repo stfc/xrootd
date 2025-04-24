@@ -469,7 +469,7 @@ int XrdXrootdProtocol::Process2()
       switch(Request.header.requestid)
             {case kXR_login:    return do_Login();
              case kXR_protocol: return do_Protocol();
-             case kXR_bind:     return do_Bind();
+             //case kXR_bind:     return do_Bind();
              default:           Response.Send(kXR_InvalidRequest,
                                 "Invalid request; user not logged in");
                                 return Link->setEtext("request without login");
@@ -794,6 +794,8 @@ int XrdXrootdProtocol::StatGen(struct stat &buf, char *xxBuff, int xxLen,
             if (buf.st_rdev & XRDSFS_HASBKUP)  flags |= kXR_bkpexist;
            }
        }
+        if ((fsFeatures & XrdSfs::hasCACH) != 0 && buf.st_atime != 0)
+                                               flags |= kXR_cachersp; 
    fsz = static_cast<long long>(buf.st_size);
 
 // Format the default response: <devid> <size> <flags> <mtime>

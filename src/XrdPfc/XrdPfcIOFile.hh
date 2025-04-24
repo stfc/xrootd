@@ -20,7 +20,6 @@
 
 #include <string>
 
-#include "XrdSys/XrdSysPthread.hh"
 #include "XrdPfcIO.hh"
 #include "XrdPfc.hh"
 #include "XrdPfcStats.hh"
@@ -72,7 +71,7 @@ public:
    //! \brief Abstract virtual method of XrdPfc::IO
    //! Called to destruct the IO object after it is no longer used.
    void DetachFinalize() override;
-   
+
    int  Fstat(struct stat &sbuff) override;
 
    long long FSize() override;
@@ -86,10 +85,7 @@ private:
    int ReadVBegin(const XrdOucIOVec *readV, int n, ReadReqRH *rh);
    int ReadVEnd(int retval, ReadReqRH *rh);
 
-   struct stat *m_localStat;
-   int initCachedStat();
-
-
+   int initialStat(struct stat &sbuff);
 };
 
 }

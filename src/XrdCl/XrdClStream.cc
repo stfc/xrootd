@@ -322,7 +322,7 @@ namespace XrdCl
       path.up = 0;
     }
 
-    log->Dump( PostMasterMsg, "[%s] Sending message %s (0x%x) through "
+    log->Dump( PostMasterMsg, "[%s] Sending message %s (%p) through "
                "substream %d expecting answer at %d", pStreamName.c_str(),
                msg->GetObfuscatedDescription().c_str(), msg, path.up, path.down );
 
@@ -506,7 +506,7 @@ namespace XrdCl
     if( !handler )
     {
       ServerResponse *rsp = (ServerResponse*)msg->GetBuffer();
-      log->Warning( PostMasterMsg, "[%s] Discarding received message: 0x%x "
+      log->Warning( PostMasterMsg, "[%s] Discarding received message: %p "
                     "(status=%d, SID=[%d,%d]), no MsgHandler found.",
                     pStreamName.c_str(), msg.get(), rsp->hdr.status,
                     rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
@@ -516,12 +516,12 @@ namespace XrdCl
     //--------------------------------------------------------------------------
     // We have a handler, so we call the callback
     //--------------------------------------------------------------------------
-    log->Dump( PostMasterMsg, "[%s] Handling received message: 0x%x.",
+    log->Dump( PostMasterMsg, "[%s] Handling received message: %p.",
                pStreamName.c_str(), msg.get() );
 
     if( action & (MsgHandler::NoProcess|MsgHandler::Ignore) )
     {
-      log->Dump( PostMasterMsg, "[%s] Ignoring the processing handler for: 0x%x.",
+      log->Dump( PostMasterMsg, "[%s] Ignoring the processing handler for: %s.",
                  pStreamName.c_str(), msg->GetObfuscatedDescription().c_str() );
 
       // if we are handling partial response we have to take down the timeout fence
@@ -559,9 +559,26 @@ namespace XrdCl
     h.msg = pSubStreams[subStream]->outQueue->PopMessage( h.handler,
                                                           h.expires,
                                                           h.stateful );
+
+    log->Debug( PostMasterMsg, "[%s] Duplicating MsgHandler: %p (message: %s) "
+                "from out-queue to in-queue, starting to send outgoing.",
+                pUrl->GetHostId().c_str(), h.handler,
+                h.msg->GetObfuscatedDescription().c_str() );
+
     scopedLock.UnLock();
+
     if( h.handler )
+    {
+      bool rmMsg = false;
+      pIncomingQueue->AddMessageHandler( h.handler, rmMsg );
+      if( rmMsg )
+      {
+        Log *log = DefaultEnv::GetLog();
+        log->Warning( PostMasterMsg, "[%s] Removed a leftover msg from the in-queue.",
+                      pStreamName.c_str() );
+      }
       h.handler->OnReadyToSend( h.msg );
+    }
     return std::make_pair( h.msg, h.handler );
   }
 
@@ -591,15 +608,11 @@ namespace XrdCl
     pBytesSent += bytesSent;
     if( h.handler )
     {
+      // ensure expiration time is assigned if still in queue
+      pIncomingQueue->AssignTimeout( h.handler );
+      // OnStatusReady may cause the handler to delete itself, in
+      // which case the handler or the user callback may also delete msg
       h.handler->OnStatusReady( msg, XRootDStatus() );
-      bool rmMsg = false;
-      pIncomingQueue->AddMessageHandler( h.handler, h.handler->GetExpiration(), rmMsg );
-      if( rmMsg )
-      {
-        Log *log = DefaultEnv::GetLog();
-        log->Warning( PostMasterMsg, "[%s] Removed a leftover msg from the in-queue.",
-                      pStreamName.c_str(), subStream );
-      }
     }
     pSubStreams[subStream]->outMsgHelper.Reset();
   }
@@ -647,8 +660,8 @@ namespace XrdCl
       //------------------------------------------------------------------------
       if( pSubStreams.size() > 1 )
       {
-        log->Debug( PostMasterMsg, "[%s] Attempting to connect %d additional "
-                    "streams.", pStreamName.c_str(), pSubStreams.size()-1 );
+        log->Debug( PostMasterMsg, "[%s] Attempting to connect %zu additional streams.",
+                    pStreamName.c_str(), pSubStreams.size() - 1 );
         for( size_t i = 1; i < pSubStreams.size(); ++i )
         {
           pSubStreams[i]->socket->SetAddress( pSubStreams[0]->socket->GetAddress() );
@@ -745,8 +758,8 @@ namespace XrdCl
     // Check if we still have time to try and do something in the current window
     //--------------------------------------------------------------------------
     time_t elapsed = now-pConnectionInitTime;
-    log->Error( PostMasterMsg, "[%s] elapsed = %d, pConnectionWindow = %d "
-               "seconds.", pStreamName.c_str(), elapsed, pConnectionWindow );
+    log->Error( PostMasterMsg, "[%s] elapsed = %lld, pConnectionWindow = %d seconds.",
+                pStreamName.c_str(), (long long) elapsed, pConnectionWindow );
 
     //------------------------------------------------------------------------
     // If we have some IP addresses left we try them
@@ -775,8 +788,8 @@ namespace XrdCl
     else if( elapsed < pConnectionWindow && pConnectionCount < pConnectionRetry
              && !status.IsFatal() )
     {
-      log->Info( PostMasterMsg, "[%s] Attempting reconnection in %d "
-                 "seconds.", pStreamName.c_str(), pConnectionWindow-elapsed );
+      log->Info( PostMasterMsg, "[%s] Attempting reconnection in %lld seconds.",
+                 pStreamName.c_str(), (long long) (pConnectionWindow - elapsed) );
 
       Task *task = new ::StreamConnectorTask( *pUrl, pStreamName );
       pTaskManager->RegisterTask( task, pConnectionInitTime+pConnectionWindow );
@@ -824,6 +837,7 @@ namespace XrdCl
       OutQueue::MsgHelper &h = pSubStreams[subStream]->outMsgHelper;
       pSubStreams[subStream]->outQueue->PushFront( h.msg, h.handler, h.expires,
                                                    h.stateful );
+      pIncomingQueue->RemoveMessageHandler(h.handler);
       pSubStreams[subStream]->outMsgHelper.Reset();
     }
 
@@ -921,7 +935,7 @@ namespace XrdCl
       pSubStreams[substream]->status = Socket::Disconnected;
 
       if( !hush )
-        log->Error( PostMasterMsg, "[%s] Forcing error on disconnect: %s.",
+        log->Debug( PostMasterMsg, "[%s] Forcing error on disconnect: %s.",
                     pStreamName.c_str(), status.ToString().c_str() );
 
       //--------------------------------------------------------------------
@@ -932,6 +946,7 @@ namespace XrdCl
         OutQueue::MsgHelper &h = pSubStreams[substream]->outMsgHelper;
         pSubStreams[substream]->outQueue->PushFront( h.msg, h.handler, h.expires,
                                                      h.stateful );
+        pIncomingQueue->RemoveMessageHandler(h.handler);
         pSubStreams[substream]->outMsgHelper.Reset();
       }
 

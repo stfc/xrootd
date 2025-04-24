@@ -107,6 +107,14 @@ private:
   // be included in the response.
   int PostProcessChecksum(std::string &digest_header);
 
+  // Process the listing request of a GET request against a directory
+  // - final_: True if this is the last entry in the listing.
+  int PostProcessListing(bool final_);
+
+  // Send the response for a GET request for a file read (i.e., not a directory)
+  // Invoked after the open is successful but before the first read is issued.
+  int ReturnGetHeaders();
+
   /// Cook and send the response after the bridge did something
   /// Return values:
   ///  0->everything OK, additionsl steps may be required
@@ -135,6 +143,12 @@ private:
   // the data and necessary headers, assuming multipart/byteranges content type.
   int sendReadResponsesMultiRanges(const XrdHttpIOList &received);
 
+  // If requested by the client, sends any I/O errors that occur during the transfer
+  // into a footer.
+  void sendFooterError(const std::string &);
+
+  // Set the age header from the file modification time
+  void addAgeHeader(std::string & headers);
   /**
    * Extract a comma separated list of checksums+metadata into a vector
    * @param checksumList the list like "0:sha1, 1:adler32, 2:md5"
@@ -269,7 +283,9 @@ public:
   /// Additional opaque info that may come from the hdr2cgi directive
   std::string hdr2cgistr;
   bool m_appended_hdr2cgistr;
-  
+  /// Track whether we already appended the oss.asize argument for PUTs.
+  bool m_appended_asize{false};
+
   //
   // Area for coordinating request and responses to/from the bridge
   //

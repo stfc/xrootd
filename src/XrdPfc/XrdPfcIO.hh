@@ -5,9 +5,7 @@ class XrdSysTrace;
 
 #include "XrdPfc.hh"
 #include "XrdOuc/XrdOucCache.hh"
-#include "XrdCl/XrdClDefaultEnv.hh"
-#include "XrdSys/XrdSysPthread.hh"
-#include <XrdSys/XrdSysRAtomic.hh>
+#include "XrdSys/XrdSysRAtomic.hh"
 
 namespace XrdPfc
 {
@@ -53,7 +51,7 @@ protected:
    const char  *m_traceID;
 
    const char*  GetPath()         { return m_io->Path(); }
-   std::string  GetFilename()     { return XrdCl::URL(GetPath()).GetPath(); }
+   std::string  GetFilename();
    const char*  RefreshLocation() { return m_io->Location(true);  }
 
    unsigned short ObtainReadSid() { return m_read_seqid++; }
@@ -85,6 +83,16 @@ private:
    int    m_active_prefetches {0};
    bool   m_allow_prefetching {true};
    bool   m_in_detach         {false};
+
+protected:
+   int                m_incomplete_count {0};
+   std::map<int, int> m_error_counts;
+   bool register_incomplete_read() {
+      return m_incomplete_count++ == 0;
+   }
+   bool register_block_error(int res) {
+      return m_error_counts[res]++ == 0;
+   }
 };
 }
 

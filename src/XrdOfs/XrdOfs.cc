@@ -2589,10 +2589,12 @@ int XrdOfs::Emsg(const char    *pfx,    // Message prefix value
 
 // Screen out non-errors
 //
+
    if ((rc = EmsgType(ecode)) != SFS_ERROR) return rc;
 
 // Setup message handling
 //
+
    if (einfo.extData()) einfo.Reset();
    buffer = einfo.getMsgBuff(buflen);
    std::string eText;

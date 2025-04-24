@@ -41,6 +41,7 @@
 //! with a key of "XrdMonRoll*".
 //-----------------------------------------------------------------------------
 
+class XrdMonitor;
 class XrdMonRoll
 {
 public:
@@ -79,10 +80,14 @@ static RAtomic_uint EOV; // Variable at the end of the setVec.
 
 enum rollType {Misc, Protocol};
 
-virtual bool Register(rollType setType, const char* setName, setMember setVec[])
-                     {return true;}
+bool Register(rollType setType, const char* setName, setMember setVec[]);
 
-             XrdMonRoll() {}
+             XrdMonRoll(XrdMonitor& xMon);
             ~XrdMonRoll() {}
+
+private:
+XrdMonitor& xrdMon;
+void*       rsvd[3];
+
 };
 #endif

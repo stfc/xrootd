@@ -53,6 +53,7 @@
 
 #include <openssl/ssl.h>
 
+#include <unordered_map>
 #include <vector>
 
 #include "XrdHttpReq.hh"
@@ -214,6 +215,7 @@ private:
   static int xlistredir(XrdOucStream &Config);
   static int xselfhttps2http(XrdOucStream &Config);
   static int xembeddedstatic(XrdOucStream &Config);
+  static int xstaticheader(XrdOucStream &Config);
   static int xstaticredir(XrdOucStream &Config);
   static int xstaticpreload(XrdOucStream &Config);
   static int xgmap(XrdOucStream &Config);
@@ -230,6 +232,7 @@ private:
   static XrdHttpSecXtractor *secxtractor;
   
   static bool usingEC;   // using XrdEC
+  static bool hasCache;  // This is a caching server
   // Loads the SecXtractor plugin, if available
   static int LoadSecXtractor(XrdSysError *eDest, const char *libName,
                       const char *libParms);
@@ -452,6 +455,7 @@ protected:
 
   /// If set to true, the HTTP TPC transfers will forward the credentials to redirected hosts
   static bool tpcForwardCreds;
+
 
   /// Redirect helper from SciTokens
   static XrdSciTokensRedir *m_redir;

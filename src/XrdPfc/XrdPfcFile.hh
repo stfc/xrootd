@@ -18,16 +18,15 @@
 // along with XRootD.  If not, see <http://www.gnu.org/licenses/>.
 //----------------------------------------------------------------------------------
 
-#include "XrdCl/XrdClXRootDResponses.hh"
-#include "XrdCl/XrdClDefaultEnv.hh"
+#include "XrdPfcTypes.hh"
+#include "XrdPfcInfo.hh"
+#include "XrdPfcStats.hh"
 
 #include "XrdOuc/XrdOucCache.hh"
 #include "XrdOuc/XrdOucIOVec.hh"
 
-#include "XrdPfcInfo.hh"
-#include "XrdPfcStats.hh"
-
 #include <functional>
+#include <list>
 #include <map>
 #include <set>
 #include <string>
@@ -35,13 +34,9 @@
 class XrdJob;
 class XrdOucIOVec;
 
-namespace XrdCl
-{
-class Log;
-}
-
 namespace XrdPfc
 {
+class File;
 class BlockResponseHandler;
 class DirectResponseHandler;
 class IO;
@@ -50,12 +45,6 @@ struct ReadVBlockListRAM;
 struct ReadVChunkListRAM;
 struct ReadVBlockListDisk;
 struct ReadVChunkListDisk;
-}
-
-
-namespace XrdPfc
-{
-class  File;
 
 struct ReadReqRH : public XrdOucCacheIOCB
 {
@@ -78,6 +67,7 @@ struct ReadRequest
 
    long long   m_bytes_read = 0;
    int         m_error_cond = 0; // to be set to -errno
+   int         m_error_count = 0;
    Stats       m_stats;
 
    int         m_n_chunk_reqs = 0;
@@ -88,7 +78,7 @@ struct ReadRequest
       m_io(io), m_rh(rh)
    {}
 
-   void update_error_cond(int ec) { if (m_error_cond == 0 ) m_error_cond = ec; }
+   void update_error_cond(int ec) { ++m_error_count; if (m_error_cond == 0 ) m_error_cond = ec; }
 
    bool is_complete()  const { return m_n_chunk_reqs == 0 && m_sync_done && m_direct_done; }
    int  return_value() const { return m_error_cond ? m_error_cond : m_bytes_read; }
@@ -102,7 +92,7 @@ struct ChunkRequest
    char        *m_buf;      // Where to place the data chunk.
    long long    m_off;      // Offset *within* the corresponding block.
    int          m_size;     // Size of the data chunk.
- 
+
    ChunkRequest(ReadRequest *rreq, char *buf, long long off, int size) :
       m_read_req(rreq), m_buf(buf), m_off(off), m_size(size)
    {}
@@ -211,16 +201,14 @@ public:
 
 class File
 {
+   friend class Cache;
    friend class BlockResponseHandler;
    friend class DirectResponseHandler;
 public:
-   // Constructor and Open() are private.
+   // Constructor, destructor, Open() and Close() are private.
 
    //! Static constructor that also does Open. Returns null ptr if Open fails.
    static File* FileOpen(const std::string &path, long long offset, long long fileSize);
-
-   //! Destructor.
-   ~File();
 
    //! Handle removal of a block from Cache's write queue.
    void BlockRemovedFromWriteQ(Block*);
@@ -244,7 +232,7 @@ public:
    //! Used in XrdPosixXrootd::Close()
    //----------------------------------------------------------------------
    bool ioActive(IO *io);
-   
+
    //----------------------------------------------------------------------
    //! \brief Flags that detach stats should be written out in final sync.
    //! Called from CacheIO upon Detach.
@@ -271,19 +259,17 @@ public:
    //! Log path
    const char* lPath() const;
 
-   std::string& GetLocalPath() { return m_filename; }
+   const std::string& GetLocalPath() const { return m_filename; }
 
    XrdSysError* GetLog();
    XrdSysTrace* GetTrace();
 
-   long long GetFileSize() { return m_file_size; }
+   long long GetFileSize() const { return m_file_size; }
 
    void AddIO(IO *io);
    int  GetPrefetchCountOnIO(IO *io);
    void StopPrefetchingOnIO(IO *io);
    void RemoveIO(IO *io);
-
-   Stats DeltaStatsFromLastCall();
 
    std::string        GetRemoteLocations()   const;
    const Info::AStat* GetLastAccessStats()   const { return m_cfi.GetLastAccessStats(); }
@@ -291,19 +277,28 @@ public:
    int                GetBlockSize()         const { return m_cfi.GetBufferSize(); }
    int                GetNBlocks()           const { return m_cfi.GetNBlocks(); }
    int                GetNDownloadedBlocks() const { return m_cfi.GetNDownloadedBlocks(); }
+   long long          GetPrefetchedBytes()   const { return m_prefetch_bytes; }
    const Stats&       RefStats()             const { return m_stats; }
+
+   int Fstat(struct stat &sbuff);
 
    // These three methods are called under Cache's m_active lock
    int get_ref_cnt() { return   m_ref_cnt; }
    int inc_ref_cnt() { return ++m_ref_cnt; }
    int dec_ref_cnt() { return --m_ref_cnt; }
 
-   void initiate_emergency_shutdown();
-   bool is_in_emergency_shutdown() { return m_in_shutdown; }
+   long long initiate_emergency_shutdown();
+   bool      is_in_emergency_shutdown() { return m_in_shutdown; }
 
 private:
    //! Constructor.
    File(const std::string &path, long long offset, long long fileSize);
+
+   //! Destructor.
+   ~File();
+
+   //! Close data and cinfo file.
+   void Close();
 
    //! Open file handle for data file and info file on local disk.
    bool Open();
@@ -311,14 +306,14 @@ private:
    static const char *m_traceID;
 
    int            m_ref_cnt;            //!< number of references from IO or sync
-   
+
    XrdOssDF      *m_data_file;          //!< file handle for data file on disk
    XrdOssDF      *m_info_file;          //!< file handle for data-info file on disk
    Info           m_cfi;                //!< download status of file blocks and access statistics
 
-   std::string    m_filename;           //!< filename of data file on disk
-   long long      m_offset;             //!< offset of cached file for block-based / hdfs operation
-   long long      m_file_size;          //!< size of cached disk file for block-based operation
+   const std::string    m_filename;     //!< filename of data file on disk
+   const long long      m_offset;       //!< offset of cached file for block-based / hdfs operation
+   const long long      m_file_size;    //!< size of cached disk file for block-based operation
 
    // IO objects attached to this file.
 
@@ -350,10 +345,16 @@ private:
    long long     m_block_size;
    int           m_num_blocks;
 
-   // Stats
+   // Stats and ResourceMonitor interface
 
    Stats         m_stats;              //!< cache statistics for this instance
-   Stats         m_last_stats;         //!< copy of cache stats during last purge cycle, used for per directory stat reporting
+   Stats         m_delta_stats;        //!< unreported updates to stats
+   long long     m_st_blocks;          //!< last reported st_blocks
+   long long     m_resmon_report_threshold;
+   int           m_resmon_token;       //!< token used in communication with the ResourceMonitor
+
+   void check_delta_stats();
+   void report_and_merge_delta_stats();
 
    std::set<std::string> m_remote_locations; //!< Gathered in AddIO / ioUpdate / ioActive.
    void insert_remote_location(const std::string &loc);
@@ -364,13 +365,14 @@ private:
 
    PrefetchState_e m_prefetch_state;
 
+   long long m_prefetch_bytes;
    int   m_prefetch_read_cnt;
    int   m_prefetch_hit_cnt;
    float m_prefetch_score;              // cached
 
    void inc_prefetch_read_cnt(int prc) { if (prc) { m_prefetch_read_cnt += prc; calc_prefetch_score(); } }
    void inc_prefetch_hit_cnt (int phc) { if (phc) { m_prefetch_hit_cnt  += phc; calc_prefetch_score(); } }
-   void calc_prefetch_score() { m_prefetch_score = float(m_prefetch_hit_cnt) / m_prefetch_read_cnt; }   
+   void calc_prefetch_score() { m_prefetch_score = float(m_prefetch_hit_cnt) / m_prefetch_read_cnt; }
 
    // Helpers
 
