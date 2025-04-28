@@ -1,13 +1,24 @@
-#-------------------------------------------------------------------------------
-# Project description
-#-------------------------------------------------------------------------------
-cmake_minimum_required(VERSION 3.16...3.30 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.16...3.31 FATAL_ERROR)
+
+# Check for in-source builds
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR)
+  message(FATAL_ERROR "XRootD cannot be built in-source! "
+                      "Please run cmake <src-dir> outside the "
+                      "source directory and be sure to remove "
+                      "CMakeCache.txt or CMakeFiles if they "
+                      "exist in the source directory.")
+endif()
 
 project( XRootD )
 
 set( CMAKE_MODULE_PATH
  ${PROJECT_SOURCE_DIR}/src
  ${PROJECT_SOURCE_DIR}/cmake )
+
+# Place build artifacts in ${CMAKE_BINARY_DIR}/{bin,lib}
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin CACHE PATH "")
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib CACHE PATH "")
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib CACHE PATH "")
 
 include(XRootDVersion)
 
@@ -18,16 +29,12 @@ include(XRootDVersion)
 #-------------------------------------------------------------------------------
 ADD_CUSTOM_TARGET(plugins)
 
-
-include( XRootDUtils )
-CheckBuildDirectory()
+include(GNUInstallDirs)
 
 include( XRootDOSDefs )
 include( XRootDDefaults )
 include( XRootDSystemCheck )
 include( XRootDFindLibs )
-
-add_definitions( -DXRDPLUGIN_SOVERSION="${PLUGIN_VERSION}" )
 
 #-------------------------------------------------------------------------------
 # Generate the version header
@@ -39,7 +46,7 @@ configure_file(src/XrdVersion.hh.in src/XrdVersion.hh)
 # Build in subdirectories
 #-------------------------------------------------------------------------------
 
-include_directories(BEFORE ${CMAKE_SOURCE_DIR}/src ${CMAKE_BINARY_DIR}/src)
+include_directories(BEFORE ${PROJECT_SOURCE_DIR}/src ${PROJECT_BINARY_DIR}/src)
 
 include(CTest)
 
@@ -68,6 +75,7 @@ configure_package_config_file(cmake/${PROJECT_NAME}Config.cmake.in cmake/${PROJE
   INSTALL_DESTINATION
     ${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}
   PATH_VARS
+    CMAKE_INSTALL_BINDIR
     CMAKE_INSTALL_INCLUDEDIR
     CMAKE_INSTALL_LIBDIR
     CMAKE_INSTALL_DATADIR

@@ -61,6 +61,7 @@ AlmaLinux 8:
   image: almalinux:8
   before_script:
     - dnf install -y epel-release
+    - dnf install -y epel-rpm-macros
     - dnf config-manager --set-enabled powertools
   <<: *rpm_build_dnf
 
@@ -78,10 +79,10 @@ AlmaLinux 10 (beta):
     - dnf config-manager --set-enabled crb
   <<: *rpm_build_dnf
 
-Fedora 40:
-  image: fedora:40
-  <<: *rpm_build_dnf
-
 Fedora 41:
   image: fedora:41
+  <<: *rpm_build_dnf
+
+Fedora 42:
+  image: fedora:42
   <<: *rpm_build_dnf

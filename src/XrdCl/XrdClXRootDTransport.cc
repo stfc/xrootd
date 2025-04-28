@@ -2927,6 +2927,8 @@ namespace XrdCl
           o << "none";
         else
         {
+          if( sreq->options & kXR_compress )
+            o << "kXR_compress ";
           if( sreq->options & kXR_delete )
             o << "kXR_delete ";
           if( sreq->options & kXR_force )
@@ -2936,17 +2938,23 @@ namespace XrdCl
           if( sreq->options & kXR_new )
             o << "kXR_new ";
           if( sreq->options & kXR_nowait )
-            o << "kXR_delete ";
+            o << "kXR_nowait ";
           if( sreq->options & kXR_open_apnd )
             o << "kXR_open_apnd ";
           if( sreq->options & kXR_open_read )
             o << "kXR_open_read ";
           if( sreq->options & kXR_open_updt )
             o << "kXR_open_updt ";
+          if( sreq->options & kXR_open_wrto )
+            o << "kXR_open_wrto ";
           if( sreq->options & kXR_posc )
             o << "kXR_posc ";
+          if( sreq->options & kXR_prefname )
+            o << "kXR_prefname ";
           if( sreq->options & kXR_refresh )
             o << "kXR_refresh ";
+          if( sreq->options & kXR_4dirlist )
+            o << "kXR_4dirlist ";
           if( sreq->options & kXR_replica )
             o << "kXR_replica ";
           if( sreq->options & kXR_seqio )
@@ -3059,6 +3067,47 @@ namespace XrdCl
         o << ", ";
         o << "offset: " << sreq->offset << ", ";
         o << "size: " << sreq->dlen << ")";
+        break;
+      }
+
+      //------------------------------------------------------------------------
+      // kXR_fattr
+      //------------------------------------------------------------------------
+      case kXR_fattr:
+      {
+        ClientFattrRequest *sreq = (ClientFattrRequest *)msg;
+        int nattr = sreq->numattr;
+        int options = sreq->options;
+        o << "kXR_fattr";
+        switch (sreq->subcode) {
+          case kXR_fattrGet:
+            o << "Get";
+            break;
+          case kXR_fattrSet:
+            o << "Set";
+            break;
+          case kXR_fattrList:
+            o << "List";
+            break;
+          case kXR_fattrDel:
+            o << "Delete";
+            break;
+          default:
+            o << " unknown subcode: " << sreq->subcode;
+            break;
+        }
+        o << " (handle: " << FileHandleToStr( sreq->fhandle );
+        o << std::setbase(10);
+        if (nattr)
+          o << ", numattr: " << nattr;
+        if (options) {
+          o << ", options: ";
+          if (options & 0x01)
+            o << "new";
+          if (options & 0x10)
+            o << "list values";
+        }
+        o << ", total size: " << req->dlen << ")";
         break;
       }
 
