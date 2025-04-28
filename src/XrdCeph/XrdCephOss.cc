@@ -28,14 +28,8 @@
 #include <fcntl.h>
 #include <limits.h>
 
-#include "XrdVersion.hh"
-#include "XrdCeph/XrdCephOss.hh"
-#include "XrdCeph/XrdCephOssDir.hh"
-#include "XrdCeph/XrdCephOssFile.hh"
+#include <chrono>
 #include "XrdCeph/XrdCephPosix.hh"
-#include "XrdCeph/XrdCephOssBufferedFile.hh"
-#include "XrdCeph/XrdCephOssReadVFile.hh"
-
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPlatform.hh"
@@ -43,6 +37,12 @@
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucName2Name.hh"
 #include "XrdOuc/XrdOucN2NLoader.hh"
+#include "XrdVersion.hh"
+#include "XrdCeph/XrdCephOss.hh"
+#include "XrdCeph/XrdCephOssDir.hh"
+#include "XrdCeph/XrdCephOssFile.hh"
+#include "XrdCeph/XrdCephOssBufferedFile.hh"
+#include "XrdCeph/XrdCephOssReadVFile.hh"
 
 XrdVERSIONINFO(XrdOssGetStorageSystem, XrdCephOss);
 
@@ -115,7 +115,7 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
   if (attrLen <= 0) {
     retval = -EINVAL;
   } else {
-    attrValue[attrLen] = '\0';
+    attrValue[attrLen] = (char)'\0';
     char *endPointer = (char *)NULL;
     retval = strtoll(attrValue, &endPointer, 10);
   }
@@ -348,7 +348,7 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            if (!Config.GetRest(parms, sizeof(parms)) || parms[0]) {
              Eroute.Emsg("Config", "readvalgname parameters will be ignored");
            }
-          m_configBufferIOmode = var; // allowed values would be aio, io
+          m_configBufferIOmode = var; // allowed values would be aio, io, write-only-io
          } else {
            Eroute.Emsg("Config", "Missing value for ceph.bufferiomode in config file", configfn);
            return 1;
@@ -364,10 +364,8 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            return 1; 
          }
        }       
-     } // while
-
-     // Now check if any errors occurred during file i/o
-
+     }
+     // Now check if any errors occured during file i/o
      int retc = Config.LastError();
      if (retc) {
        NoGo = Eroute.Emsg("Config", -retc, "read config file",
