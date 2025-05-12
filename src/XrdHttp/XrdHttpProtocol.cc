@@ -794,7 +794,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         nfo = CurrentReq.opaque->Get("xrdhttpname");
         if (nfo) {
           TRACEI(DEBUG, " Setting name: " << nfo);
-          SecEntity.name = unquote(nfo);
+          SecEntity.name = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting name: " << SecEntity.name);
         }
         
@@ -802,42 +802,42 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         if (nfo) {
           TRACEI(DEBUG, " Setting host: " << nfo);
           if (SecEntity.host) free(SecEntity.host);
-          SecEntity.host = unquote(nfo);
+          SecEntity.host = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting host: " << SecEntity.host);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpdn");
         if (nfo) {
           TRACEI(DEBUG, " Setting dn: " << nfo);
-          SecEntity.moninfo = unquote(nfo);
+          SecEntity.moninfo = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting dn: " << SecEntity.moninfo);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttprole");
         if (nfo) {
           TRACEI(DEBUG, " Setting role: " << nfo);
-          SecEntity.role = unquote(nfo);
+          SecEntity.role = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting role: " << SecEntity.role);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttpgrps");
         if (nfo) {
           TRACEI(DEBUG, " Setting grps: " << nfo);
-          SecEntity.grps = unquote(nfo);
+          SecEntity.grps = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting grps: " << SecEntity.grps);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpendorsements");
         if (nfo) {
           TRACEI(DEBUG, " Setting endorsements: " << nfo);
-          SecEntity.endorsements = unquote(nfo);
+          SecEntity.endorsements = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting endorsements: " << SecEntity.endorsements);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpcredslen");
         if (nfo) {
           TRACEI(DEBUG, " Setting credslen: " << nfo);
-          char *s1 = unquote(nfo);
+          char *s1 = strdup(decode_str(nfo).c_str());
           if (s1 && s1[0]) {
             SecEntity.credslen = atoi(s1);
             TRACEI(REQ, " Setting credslen: " << SecEntity.credslen);
@@ -849,7 +849,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
           nfo = CurrentReq.opaque->Get("xrdhttpcreds");
           if (nfo) {
             TRACEI(DEBUG, " Setting creds: " << nfo);
-            SecEntity.creds = unquote(nfo);
+            SecEntity.creds = strdup(decode_str(nfo).c_str());
             TRACEI(REQ, " Setting creds: " << SecEntity.creds);
           }
         }
@@ -2637,8 +2637,9 @@ int XrdHttpProtocol::xstaticheader(XrdOucStream & Config) {
 
   for (const auto &verb : verbs) {
     auto iter = m_staticheader_map.find(verb);
-    if (iter == m_staticheader_map.end() && !header_value.empty()) {
-      m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
+    if (iter == m_staticheader_map.end()) {
+      if (!header_value.empty())
+        m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
     } else if (header_value.empty()) {
       iter->second.clear();
     } else {

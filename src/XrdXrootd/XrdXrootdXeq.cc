@@ -105,8 +105,6 @@ struct XrdXrootdSessID
 
 namespace
 {
-static const int op_isOpen    = 0x00010000;
-static const int op_isRead    = 0x00020000;
 
 const char *getTime()
 {
@@ -2814,7 +2812,7 @@ int XrdXrootdProtocol::do_Set_Cache(XrdOucTokenizer &setargs)
 {
    XrdOucErrInfo myError(Link->ID, Monitor.Did, clientPV);
    XrdSfsFSctl myData;
-   char *cmd, *cargs, *opaque;
+   char *cmd, *cargs, *opaque = nullptr;
    const char *myArgs[2];
 
 // This set is valid only if we implement a cache

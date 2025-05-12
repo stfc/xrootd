@@ -53,7 +53,7 @@ struct XrdOucIOVec;
 class XrdPosixCallBack;
 class XrdPosixCallBackIO;
 class XrdPosixFile;
-class XrdPosixInfo;
+struct XrdPosixInfo;
 class XrdPosixAdmin;
 
 //-----------------------------------------------------------------------------
@@ -373,6 +373,19 @@ inline int     fdOrigin() {return baseFD;}
 static bool    isXrootdDir(DIR *dirp);
 
 static bool    myFD(int fd);
+
+// The XRootD client will fetch the information needed for a full `stat` call
+// as part of the directory listing.  By calling this function from XrdPss
+// layer, we enable the use of the `autoStat` functionality, which avoids
+// having to call `stat` for each entry in the directory listing.
+//
+// On error, returns errno; on success, returns 0 and stores the buffer
+// internally; on subsequent Readdir calls, the `buf` contents are filled in
+// as if one called `fstatat` on it.
+//
+// Note that this matches other XrdPosixXrootd methods in returning errno on
+// failure; this differs from the similar XrdOss method which returns -errno.
+static int     StatRet(DIR *dirp, struct stat *buf);
 
 /* There must be one instance of this object per executable image. Typically,
    this object is declared in main() or at file level. This is necessary to

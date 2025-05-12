@@ -431,13 +431,20 @@ namespace XrdCl
     else
     {
       AnyObject  qryResult;
-      int       *qryResponse = 0;
+      int       *qryResponse = nullptr;
       pPostMaster->QueryTransport( pUrl, XRootDQuery::ServerFlags, qryResult );
       qryResult.Get( qryResponse );
-      pHosts->back().flags = *qryResponse; delete qryResponse; qryResponse = 0;
+      if (qryResponse) {
+        pHosts->back().flags = *qryResponse;
+        delete qryResponse;
+        qryResponse = nullptr;
+      }
       pPostMaster->QueryTransport( pUrl, XRootDQuery::ProtocolVersion, qryResult );
       qryResult.Get( qryResponse );
-      pHosts->back().protocol = *qryResponse; delete qryResponse;
+      if (qryResponse) {
+        pHosts->back().protocol = *qryResponse;
+        delete qryResponse;
+      }
     }
 
     //--------------------------------------------------------------------------
@@ -1610,7 +1617,6 @@ namespace XrdCl
         ChunkInfo  chunk         = pChunkList->front();
         bool       sizeMismatch  = false;
         uint32_t   currentOffset = 0;
-        char      *cursor        = (char*)chunk.buffer;
         for( uint32_t i = 0; i < pPartialResps.size(); ++i )
         {
           ServerResponseV2 *part  = (ServerResponseV2*)pPartialResps[i]->GetBuffer();
@@ -1628,7 +1634,6 @@ namespace XrdCl
           }
 
           currentOffset += datalen;
-          cursor        += datalen;
         }
 
         ServerResponseV2 *rspst = (ServerResponseV2*)pResponse->GetBuffer();
