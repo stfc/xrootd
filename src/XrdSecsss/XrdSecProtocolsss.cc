@@ -89,10 +89,21 @@ int                 credslen;
 char               *pident;
 
                     Persona(XrdSecsssKT::ktEnt *kP)
-                           {memset(this, 0, sizeof(Persona));
-                            kTab = kP;
-                           }
-                   ~Persona() {}
+                      : kTab(kP),
+                        xAuth(nullptr),
+                        xUser(nullptr),
+                        xGrup(nullptr),
+                        name(nullptr),
+                        host(nullptr),
+                        vorg(nullptr),
+                        role(nullptr),
+                        grps(nullptr),
+                        caps(nullptr),
+                        endo(nullptr),
+                        creds(nullptr),
+                        credslen(0),
+                        pident(nullptr)
+                    {}
 
 bool Clonable(const char *aTypes)
              {char aKey[XrdSecPROTOIDSIZE+2];
@@ -162,7 +173,7 @@ int XrdSecProtocolsss::Authenticate(XrdSecCredentials *cred,
    XrdSecsssKT::ktEnt  decKey;
    Persona             myID(&decKey);
 
-   char *idP, *dP, *eodP, *theIP = 0, *theHost = 0, *atKey = 0, eType;
+   char *idP = 0, *dP = 0, *eodP = 0, *theIP = 0, *theHost = 0, *atKey = 0, eType = '\0';
    int idNum = 0, idTLen, idSz, dLen;
    bool badAttr = false;
 
@@ -222,7 +233,7 @@ int XrdSecProtocolsss::Authenticate(XrdSecCredentials *cred,
                 case XrdSecsssRR_Data::theCred: myID.creds    = idP;
                                                 myID.credslen = idSz;break;
                 case XrdSecsssRR_Data::theHost: 
-                                     if (*idP == '[')
+                                     if (idP && *idP == '[')
                                         myID.host =   theIP   = idP;
 
                                         else          theHost = idP;
@@ -685,7 +696,10 @@ XrdSecCredentials *XrdSecProtocolsss::getCredentials(XrdSecParameters *parms,
 //
    if (v2EndPnt)
       {int k = strlen(encKey.Data.Name), n = (k + 8) & ~7;
-       strcpy(rrHdr.keyName, encKey.Data.Name);
+       if (strlcpy(rrHdr.keyName, encKey.Data.Name, sizeof(rrHdr.keyName)) >= sizeof(rrHdr.keyName))
+          { Fatal(einfo, "getCredentials", EINVAL, "Encryption key name is too long.");
+            return nullptr;
+          }
        if (n - k > 1) memset(rrHdr.keyName + k, 0, n - k);
        rrHdr.knSize = static_cast<uint8_t>(n);
       } else rrHdr.knSize = 0;
@@ -853,7 +867,7 @@ char *XrdSecProtocolsss::Load_Client(XrdOucErrInfo *erp, const char *parms)
           {Fatal(erp, "Load_Client", ENOMEM, "Unable to create keytab object.");
            return (char *)0;
           }
-       if (erp->getErrInfo())
+       if (erp && erp->getErrInfo())
           {delete ktObject, ktObject = 0; return (char *)0;}
        CLDBG("Client keytab='" <<kP <<"'");
       }

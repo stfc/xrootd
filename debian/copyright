@@ -1,6 +1,6 @@
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: xrootd
-Upstream-Contact: https://xrootd.slac.stanford.edu/contact.html
+Upstream-Contact: https://xrootd.org/contact.html
 
 Files: *
 Copyright:
@@ -88,7 +88,7 @@ Files:
  src/XrdSys/XrdSysShmem.hh
  src/XrdTls/XrdTlsContext.*
  src/XrdTls/XrdTlsSocket.*
- src/XrdTpc/XrdTpcPMarkManager.*
+ src/XrdHttpTpc/XrdHttpTpcPMarkManager.*
  src/XrdZip/*
  tests/common/*
  tests/XrdCephTests/*

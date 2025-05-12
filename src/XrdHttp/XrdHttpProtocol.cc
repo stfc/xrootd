@@ -57,6 +57,7 @@
 
 #define XRHTTP_TK_GRACETIME     600
 
+XrdVERSIONINFO(XrdHttpProtocol, xrdhttp);
 
 /******************************************************************************/
 /*                               G l o b a l s                                */
@@ -85,6 +86,7 @@ bool XrdHttpProtocol::listdeny = false;
 bool XrdHttpProtocol::embeddedstatic = true;
 char *XrdHttpProtocol::staticredir = 0;
 XrdOucHash<XrdHttpProtocol::StaticPreloadInfo> *XrdHttpProtocol::staticpreload = 0;
+XrdSciTokensRedir *XrdHttpProtocol::m_redir = nullptr;
 
 kXR_int32 XrdHttpProtocol::myRole = kXR_isManager;
 bool XrdHttpProtocol::selfhttps2http = false;
@@ -792,7 +794,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         nfo = CurrentReq.opaque->Get("xrdhttpname");
         if (nfo) {
           TRACEI(DEBUG, " Setting name: " << nfo);
-          SecEntity.name = unquote(nfo);
+          SecEntity.name = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting name: " << SecEntity.name);
         }
         
@@ -800,42 +802,42 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         if (nfo) {
           TRACEI(DEBUG, " Setting host: " << nfo);
           if (SecEntity.host) free(SecEntity.host);
-          SecEntity.host = unquote(nfo);
+          SecEntity.host = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting host: " << SecEntity.host);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpdn");
         if (nfo) {
           TRACEI(DEBUG, " Setting dn: " << nfo);
-          SecEntity.moninfo = unquote(nfo);
+          SecEntity.moninfo = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting dn: " << SecEntity.moninfo);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttprole");
         if (nfo) {
           TRACEI(DEBUG, " Setting role: " << nfo);
-          SecEntity.role = unquote(nfo);
+          SecEntity.role = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting role: " << SecEntity.role);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttpgrps");
         if (nfo) {
           TRACEI(DEBUG, " Setting grps: " << nfo);
-          SecEntity.grps = unquote(nfo);
+          SecEntity.grps = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting grps: " << SecEntity.grps);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpendorsements");
         if (nfo) {
           TRACEI(DEBUG, " Setting endorsements: " << nfo);
-          SecEntity.endorsements = unquote(nfo);
+          SecEntity.endorsements = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting endorsements: " << SecEntity.endorsements);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpcredslen");
         if (nfo) {
           TRACEI(DEBUG, " Setting credslen: " << nfo);
-          char *s1 = unquote(nfo);
+          char *s1 = strdup(decode_str(nfo).c_str());
           if (s1 && s1[0]) {
             SecEntity.credslen = atoi(s1);
             TRACEI(REQ, " Setting credslen: " << SecEntity.credslen);
@@ -847,7 +849,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
           nfo = CurrentReq.opaque->Get("xrdhttpcreds");
           if (nfo) {
             TRACEI(DEBUG, " Setting creds: " << nfo);
-            SecEntity.creds = unquote(nfo);
+            SecEntity.creds = strdup(decode_str(nfo).c_str());
             TRACEI(REQ, " Setting creds: " << SecEntity.creds);
           }
         }
@@ -1082,6 +1084,7 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
       else if TS_Xeq("httpsmode", xhttpsmode);
       else if TS_Xeq("tlsreuse", xtlsreuse);
       else if TS_Xeq("auth", xauth);
+      else if TS_Xeq("redirtoken", xredirtoken);
       else {
         eDest.Say("Config warning: ignoring unknown directive '", var, "'.");
         Config.Echo();
@@ -1600,14 +1603,18 @@ int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *hea
   } else {
     if (code == 200) ss << "OK";
     else if (code == 100) ss << "Continue";
+    else if (code == 201) ss << "Created";
     else if (code == 206) ss << "Partial Content";
     else if (code == 302) ss << "Redirect";
     else if (code == 307) ss << "Temporary Redirect";
     else if (code == 400) ss << "Bad Request";
+    else if (code == 401) ss << "Unauthorized";
     else if (code == 403) ss << "Forbidden";
     else if (code == 404) ss << "Not Found";
     else if (code == 405) ss << "Method Not Allowed";
+    else if (code == 409) ss << "Conflict";
     else if (code == 416) ss << "Range Not Satisfiable";
+    else if (code == 423) ss << "Locked";
     else if (code == 500) ss << "Internal Server Error";
     else if (code == 502) ss << "Bad Gateway";
     else if (code == 504) ss << "Gateway Timeout";
@@ -2630,8 +2637,9 @@ int XrdHttpProtocol::xstaticheader(XrdOucStream & Config) {
 
   for (const auto &verb : verbs) {
     auto iter = m_staticheader_map.find(verb);
-    if (iter == m_staticheader_map.end() && !header_value.empty()) {
-      m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
+    if (iter == m_staticheader_map.end()) {
+      if (!header_value.empty())
+        m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
     } else if (header_value.empty()) {
       iter->second.clear();
     } else {
@@ -2966,6 +2974,43 @@ int XrdHttpProtocol::xauth(XrdOucStream &Config) {
       eDest.Emsg("Config", "http.auth value is invalid"); return 1;
     }
   }
+  return 0;
+}
+
+/******************************************************************************/
+/*                           x r e d i r t o k e n                            */
+/******************************************************************************/
+
+/* Function: xredirtoken
+
+   Purpose:  Parses the `http.redirtoken` directive
+
+            `rediretoken` is curently a boolean; setting the directive enables
+            the functionality.  When enabled, an incoming token will be stripped
+            from the `authz` query parameter and replaced with an equivalent
+            macaroon.
+
+   Output: 0 upon success or 1 upon failure.
+ */
+int XrdHttpProtocol::xredirtoken(XrdOucStream &Config) {
+  auto val = Config.GetWord();
+  if (!val || !val[0])
+  {
+    val = (char *)"libXrdAccSciTokens.so";
+  }
+
+
+  char eMsgBuff[2048];
+  XrdVersionInfo *myVer = &XrdVERSIONINFOVAR(XrdHttpProtocol);
+  XrdOucPinLoader myLib(eMsgBuff, sizeof(eMsgBuff), myVer,
+                        "http.redirtoken", val);
+  auto redir = (XrdSciTokensRedir **)(myLib.Resolve("SciTokensRedir"));
+  if (redir == nullptr) {
+    eDest.Emsg("redirtoken", "Failed to resolve the SciTokenRedir symbol in token library");
+    return 1;
+  }
+
+  m_redir = *redir;
   return 0;
 }
 

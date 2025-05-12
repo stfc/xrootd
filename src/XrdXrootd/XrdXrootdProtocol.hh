@@ -76,7 +76,6 @@ class XrdOucTokenizer;
 class XrdSecProtect;
 class XrdSecProtector;
 class XrdSfsDirectory;
-class XrdSfsFACtl;
 class XrdSfsFileSystem;
 class XrdSecProtocol;
 class XrdBuffer;
@@ -90,8 +89,10 @@ class XrdXrootdMonitor;
 class XrdXrootdPgwCtl;
 class XrdXrootdPio;
 class XrdXrootdStats;
-class XrdXrootdWVInfo;
 class XrdXrootdXPath;
+
+struct XrdSfsFACtl;
+struct XrdXrootdWVInfo;
 
 /******************************************************************************/
 /*                   N a m e s p a c e   X r d X r o o t d                    */
@@ -237,7 +238,8 @@ private:
 enum RD_func {RD_chmod = 0, RD_chksum,  RD_dirlist, RD_locate, RD_mkdir,
               RD_mv,        RD_prepare, RD_prepstg, RD_rm,     RD_rmdir,
               RD_stat,      RD_trunc,   RD_ovld,    RD_client,
-              RD_open1,     RD_open2,   RD_open3,   RD_open4,  RD_Num};
+              RD_write,     RD_open1,   RD_open2,   RD_open3,  RD_open4,
+	      RD_Num};
 
        int   do_Auth();
        int   do_Bind();
