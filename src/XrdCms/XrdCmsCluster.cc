@@ -970,7 +970,7 @@ int XrdCmsCluster::Select(XrdCmsSelect &Sel)
               pmask |= pinfo.ssvec & Sel.nmask;
            if (pmask && maxBits(pmask, baseFS.dfsTries()))
               {Sel.Resp.DLen = snprintf(Sel.Resp.Data, sizeof(Sel.Resp.Data)-1,
-               "File not found - too many attempts to gain dfs %s access to the file", Amode)+1;
+               "File not found")+1;
                return RetryErr;
               }
           }
@@ -1053,7 +1053,7 @@ int XrdCmsCluster::Select(XrdCmsSelect &Sel)
 // Broadcast a freshen up request if wanted
 //
    if ((Sel.Opts & XrdCmsSelect::Freshen) && (amask = pmask & ~Sel.Vec.bf))
-      {CmsStateRequest Qupt={{0,kYR_state,kYR_raw|CmsStateRequest::kYR_noresp,0}};
+      {CmsStateRequest Qupt={{0,kYR_state,(kXR_char)kYR_raw|(kXR_char)CmsStateRequest::kYR_noresp,0}};
        Cluster.Broadcast(amask, Qupt.Hdr,(void *)Sel.Path.Val,Sel.Path.Len+1);
       }
 

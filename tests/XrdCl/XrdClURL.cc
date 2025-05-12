@@ -53,13 +53,12 @@ TEST(URLTest, RemoteURLs)
     for (const char *user : { "", "alice", "bob", "user_123", "xrootd" }) {
       for (const char *password : { "", "abc ABC 123", "symbols \\~`!#$%^&*()_-+={[}]|:;'\"<,>.?" }) {
         for (const char *host : { "localhost", "[::1]", "127.0.0.1", "eospilot.cern.ch" }) {
-          for (const char *port : { "", "-1", "1094", "9999", "65535" }) {
+          for (const char *port : { "", "0", "1094", "9999", "65535" }) {
             for (const char *path : { "", "/", "/data", "/data/", "/data/file.dat", "/data//file" }) {
               for (const char *params : { "", "?param=value", "?param1=value1&param2=value2" }) {
                 snprintf(url, sizeof(url), "%s%s%s%s%s%s%s%s%s%s%s%s",
                   protocol, *protocol ? "://" : "",
-                  // TODO: allow empty user and/or password in the login part
-                  user, *user && *password ? ":" : "", *user ? password : "", *user ? "@" : "",
+                  user, *password ? ":" : "", password, *user || *password ? "@" : "",
                   // TODO: accept URLs with empty path and non-empty parameters
                   host, *port ? ":" : "", port, *params && !*path ? "/" : "", path, params);
                 snprintf(path_params, sizeof(path_params), "%s%s", *path == '/' ? path+1 : path, params);
@@ -69,7 +68,8 @@ TEST(URLTest, RemoteURLs)
                 EXPECT_TRUE(remote_url.IsValid()) << "URL " << url << " is invalid" << std::endl;
                 EXPECT_EQ(remote_url.GetPort(), *port ? atoi(port) : default_port);
                 EXPECT_STREQ(remote_url.GetProtocol().c_str(), *protocol ? protocol : "root");
-                EXPECT_STREQ(remote_url.GetPassword().c_str(), *user && *password ? password : "");
+                EXPECT_STREQ(remote_url.GetUserName().c_str(), user);
+                EXPECT_STREQ(remote_url.GetPassword().c_str(), password);
                 EXPECT_STREQ(remote_url.GetHostName().c_str(), host);
                 EXPECT_STREQ(remote_url.GetPath().c_str(), *path == '/' ? path+1 : path);
                 EXPECT_STREQ(remote_url.GetParamsAsString().c_str(), params);
@@ -119,10 +119,11 @@ TEST(URLTest, InvalidURLs)
   const char *invalid_urls[] = {
     "root://",
     "://asds",
+    "root://localhost:-1",
     "root:////path?param1=val1&param2=val2",
     "root://@//path?param1=val1&param2=val2",
     "root://:@//path?param1=val1&param2=val2",
-    "root://asd@://path?param1=val1&param2=val2"
+    "root://asd@://path?param1=val1&param2=val2",
     "root://user1:passwd1host1:123//path?param1=val1&param2=val2",
     "root://user1:passwd1@host1:asd//path?param1=val1&param2=val2",
   };

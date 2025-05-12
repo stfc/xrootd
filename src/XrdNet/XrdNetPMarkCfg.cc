@@ -178,6 +178,7 @@ XrdNetPMark::Handle *XrdNetPMarkCfg::Begin(XrdSecEntity &client,
                                            const char   *app)
 {
    EPName("PMBegin");
+   XrdOucString altApp;
    int eCode, aCode;
 
 // If we need to screen out domains, do that
@@ -204,6 +205,23 @@ XrdNetPMark::Handle *XrdNetPMarkCfg::Begin(XrdSecEntity &client,
    if (!getCodes(client, path, cgi, eCode, aCode))
       {TRACE("Unable to determine experiment; flow not marked.");
        return 0;
+      }
+
+// Obtain the appname overridefrom the cgi
+//
+   if (cgi)                        // 01234567890123
+      {const char *apP = strstr(cgi, "pmark.appname=");
+       if (apP)
+          {apP += 14;
+           const char* aP = apP;
+           while(*aP && *aP != '&') aP++;
+           int apLen = aP - apP;
+           if (apLen > 0)
+              {altApp = "";
+               altApp.insert(apP, 0, apLen);
+               app = altApp.c_str();
+              }
+          }
       }
 
 // Continue with successor function to complete the logic
@@ -235,6 +253,11 @@ XrdNetPMark::Handle *XrdNetPMarkCfg::Begin(XrdNetAddrInfo      &addrInfo,
       {XrdNetPMarkFF *pmFF = new XrdNetPMarkFF(handle, tident);
        if (pmFF->Start(addrInfo)) return pmFF;
        delete pmFF;
+       eDest->Emsg("PMark_Begin", "Unable to start pmark for session",tident);
+      } else {
+       if (useFFly)
+          eDest->Emsg("PMark_Begin", "Flow value is invalid; "
+                                     "pmark disabled for session", tident);
       }
 
 // All done, nothing will be pmarked
@@ -621,10 +644,11 @@ void XrdNetPMarkCfg::Display()
    std::map<std::string, ExpInfo*>::iterator itV;
    for (itV = v2eMap.begin(); itV != v2eMap.end(); itV++)
        {int eCode = itV->second->Code;
+        std::string vName = std::string(" ") + itV->first;
          if ((it2E = pvRefs.find(eCode)) != pvRefs.end())
-            it2E->second.push_back(itV->first.c_str());
+            it2E->second.push_back(vName.c_str());
             else {std::vector<const char*> vec;
-                  vec.push_back(itV->first.c_str());
+                  vec.push_back(vName.c_str());
                   pvRefs[eCode] = vec;
                  }
        }
@@ -645,7 +669,7 @@ void XrdNetPMarkCfg::Display()
         if ((it2E = pvRefs.find(expCode)) != pvRefs.end())
            {std::vector<const char*> &vec = it2E->second;
             for (int i = 0; i < (int)vec.size(); i++)
-                {const char *rType = (*vec[i] == '/' ? "path " : "vorg ");
+                {const char *rType = (*vec[i] == ' ' ? "vorg" : "path ");
                  eDest->Say(hdrplu, rType, vec[i]);
                 }
            }
@@ -814,7 +838,7 @@ bool XrdNetPMarkCfg::getCodes(XrdSecEntity &client, const char *path,
 
 // If a default activity exists, return that. Otherwise, it's unspecified.
 //
-   acode = (expP->dAct >= 0 ? expP->dAct : 0);
+   acode = (expP->dAct > 0 ? expP->dAct : 1);
    return true;
 }
   
@@ -981,6 +1005,14 @@ do{if (!strcmp("debug", val) || !strcmp("nodebug", val))
       {if (!(val = Config.GetWord()))
           {eLog->Say("Config invalid: pmark defsfile value not specified");
            return 1;
+          }
+
+       if (!strcmp("fail", val) || !strcmp("nofail", val))
+          {noFail = (*val == 'n');
+           if (!(val = Config.GetWord()))
+              {eLog->Say("Config invalid: pmark defsfile location not specified");
+               return 1;
+              }
           }
 
        if (*val == '/')

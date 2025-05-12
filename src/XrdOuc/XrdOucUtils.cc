@@ -43,6 +43,7 @@
 #include "XrdSys/XrdWin32.hh"
 #else
 #include <fcntl.h>
+#include <math.h>
 #include <pwd.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -626,6 +627,37 @@ int XrdOucUtils::GroupName(gid_t gID, char *gName, int gNsz)
    return glen;
 }
 
+/******************************************************************************/
+/*                                 H S i z e                                  */
+/******************************************************************************/
+
+const char *XrdOucUtils::HSize(size_t bytes, char* buff, int bsz)
+{
+
+// Do fast conversion of the quantity is less than 1K
+//
+   if (bytes < 1024)
+      {snprintf(buff, bsz, "%zu", bytes);
+       return buff;
+      }
+
+// Scale this down
+//
+   const char *suffix = " KMGTPEYZ";
+   double dBytes = static_cast<double>(bytes);
+
+do{dBytes /= 1024.0; suffix++;
+  }  while(dBytes >= 1024.0 && *(suffix+1));
+
+
+// Format and return result. Include fractions only if they meaningfully exist.
+//
+   double whole, frac = modf(dBytes, &whole);
+   if (frac >= .005) snprintf(buff, bsz, "%.02lf%c", dBytes, *suffix);
+      else snprintf(buff, bsz, "%g%c", whole, *suffix);
+   return buff;
+}
+  
 /******************************************************************************/
 /*                                i 2 b s t r                                 */
 /******************************************************************************/
@@ -1427,7 +1459,7 @@ static bool is_token_character(int c)
   if (isalnum(c))
     return true;
 
-  static constexpr char token_chars[] = "-._~+/=:";
+  static constexpr char token_chars[] = "-._~+/=:%";
 
   for (char ch : token_chars)
     if (c == ch)

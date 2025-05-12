@@ -49,9 +49,11 @@
 #include "XrdHttpChecksumHandler.hh"
 #include "XrdHttpReadRangeHandler.hh"
 #include "XrdNet/XrdNetPMark.hh"
+#include "XrdSciTokens/XrdSciTokensRedir.hh"
 
 #include <openssl/ssl.h>
 
+#include <unordered_map>
 #include <vector>
 
 #include "XrdHttpReq.hh"
@@ -213,6 +215,7 @@ private:
   static int xlistredir(XrdOucStream &Config);
   static int xselfhttps2http(XrdOucStream &Config);
   static int xembeddedstatic(XrdOucStream &Config);
+  static int xstaticheader(XrdOucStream &Config);
   static int xstaticredir(XrdOucStream &Config);
   static int xstaticpreload(XrdOucStream &Config);
   static int xgmap(XrdOucStream &Config);
@@ -223,11 +226,13 @@ private:
   static int xhttpsmode(XrdOucStream &Config);
   static int xtlsreuse(XrdOucStream &Config);
   static int xauth(XrdOucStream &Config);
+  static int xredirtoken(XrdOucStream &Config);
   
   static bool isRequiredXtractor; // If true treat secxtractor errors as fatal
   static XrdHttpSecXtractor *secxtractor;
   
   static bool usingEC;   // using XrdEC
+  static bool hasCache;  // This is a caching server
   // Loads the SecXtractor plugin, if available
   static int LoadSecXtractor(XrdSysError *eDest, const char *libName,
                       const char *libParms);
@@ -450,5 +455,15 @@ protected:
 
   /// If set to true, the HTTP TPC transfers will forward the credentials to redirected hosts
   static bool tpcForwardCreds;
+
+  /// The static headers to always return; map is from verb to a list of (header, val) pairs.
+  static std::unordered_map<std::string, std::vector<std::pair<std::string, std::string>>> m_staticheader_map;
+
+  /// The static string version of m_staticheader_map.  After config parsing is done, this is
+  /// computed and we won't need to reference m_staticheader_map in the response path.
+  static std::unordered_map<std::string, std::string> m_staticheaders;
+
+  /// Redirect helper from SciTokens
+  static XrdSciTokensRedir *m_redir;
 };
 #endif

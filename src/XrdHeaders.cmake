@@ -1,3 +1,12 @@
+#-------------------------------------------------------------------------------
+# Install headers from a directory
+#-------------------------------------------------------------------------------
+function( install_headers destination files )
+  foreach( file ${files} )
+    string( REGEX MATCH "^(.+)/(.+)$" fileAr ${file} )
+    install( FILES ${file} DESTINATION ${destination}/${CMAKE_MATCH_1} )
+  endforeach()
+endfunction()
 
 install(
   FILES
@@ -26,6 +35,7 @@ set( XROOTD_PUBLIC_HEADERS
   XrdNet/XrdNetSocket.hh
   XrdOuc/XrdOucBuffer.hh
   XrdOuc/XrdOucCRC.hh
+  XrdOuc/XrdOucCache.hh
   XrdOuc/XrdOucCacheCM.hh
   XrdOuc/XrdOucCacheStats.hh
   XrdOuc/XrdOucCallBack.hh

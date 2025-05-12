@@ -79,7 +79,7 @@ PATH="${SOURCE_DIR}:${PATH}"
 # XRootD commands really come from there.
 
 if [[ -n "${BINARY_DIR}" ]]; then
-	PATH="${BINARY_DIR}/src:${BINARY_DIR}/src/XrdCl:${PATH}"
+	PATH="${BINARY_DIR}/bin:${PATH}"
 	for PROG in cconfig cmsd xrootd xrdcp xrdfs xrdadler32; do
 		if [[ ! "$(command -v "${PROG}")" =~ ${BINARY_DIR} ]]; then
 			error "'${PROG}': not used from build directory"
@@ -132,6 +132,14 @@ function setup() {
 		teardown "${NAME}"
 		error "failed to start XRootD server"
 	fi
+
+	# Prepare a test environment file -- can be used by other unit tests that
+	# utilize this fixture but don't inherit the shell environment from run()
+	XRD_PORT="$(cconfig -x xrootd -c "${CONF}" 2>&1 | grep xrd.port | tr -cd '0-9')"
+	HOST="root://${HOSTNAME:-localhost}:${XRD_PORT}/"
+	cat > "${LOCAL_DIR}/test_config.sh" << EOF
+HOST=$HOST
+EOF
 }
 
 function run() {
@@ -147,7 +155,7 @@ function run() {
 		error "required function not defined in ${SCRIPT}: test_${NAME}"
 	fi
 
-	test_"${NAME}" || (printlogs && exit 1)
+	(test_"${NAME}") || (printlogs && exit 1)
 }
 
 function teardown() {

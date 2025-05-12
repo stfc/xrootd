@@ -41,6 +41,7 @@ class XrdSysError;
 class XrdSysTrace;
 
 #define MAX_SCHED_PROCS 30000
+#define DFL_SCHED_PROCS  8192
 
 class XrdScheduler : public XrdJob
 {
@@ -72,6 +73,8 @@ void          Start();
 int           Stats(char *buff, int blen, int do_sync=0);
 
 void          TimeSched();
+
+void          setNproc(const bool limlower);
 
 // Statistical information
 //

@@ -22,10 +22,12 @@
 // or submit itself to any jurisdiction.
 //------------------------------------------------------------------------------
 
+#include <chrono>
 #include <stdio.h>
 #include <string>
 #include <fcntl.h>
 #include <limits.h>
+
 #include <chrono>
 #include "XrdCeph/XrdCephPosix.hh"
 #include "XrdOuc/XrdOucEnv.hh"
@@ -355,7 +357,7 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            if (!Config.GetRest(parms, sizeof(parms)) || parms[0]) {
              Eroute.Emsg("Config", "readvalgname parameters will be ignored");
            }
-          m_configBufferIOmode = var; // allowed values would be aio, io
+          m_configBufferIOmode = var; // allowed values would be aio, io, write-only-io
          } else {
            Eroute.Emsg("Config", "Missing value for ceph.bufferiomode in config file", configfn);
            return 1;
@@ -648,7 +650,7 @@ int XrdCephOss::StatLS(XrdOucEnv &env, const char *charPath, char *buff, int &bl
 {
   XrdCephEroute.Say(__FUNCTION__, " incoming path = ", charPath); 
 
-  std::string  path({charPath});
+  std::string path(charPath);
   path = extractPool(path);  
   std::string spath {path};
  

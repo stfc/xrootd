@@ -40,7 +40,7 @@ if not srcdir.startswith('$'):
         '-DCMAKE_CXX_STANDARD=${CMAKE_CXX_STANDARD}',
         '-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}',
         '-DCMAKE_CXX_FLAGS=${CMAKE_CXX_FLAGS}',
-        '-DXRootD_CLIENT_LIBRARY=${CMAKE_BINARY_DIR}/src/XrdCl/libXrdCl${CMAKE_SHARED_LIBRARY_SUFFIX}',
+        '-DXRootD_CLIENT_LIBRARY=${CMAKE_BINARY_DIR}/lib/libXrdCl${CMAKE_SHARED_LIBRARY_SUFFIX}',
         '-DXRootD_INCLUDE_DIR=${CMAKE_SOURCE_DIR}/src;${CMAKE_BINARY_DIR}/src',
     ]
 else:
@@ -66,7 +66,7 @@ def get_version():
 
     if version is None:
         from datetime import date
-        version = '5.7-rc' + date.today().strftime("%Y%m%d")
+        version = '5.8-rc' + date.today().strftime("%Y%m%d")
 
     if version.startswith('v'):
         version = version[1:]

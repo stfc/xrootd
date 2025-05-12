@@ -19,8 +19,8 @@ set(BUILD_CEPH TRUE CACHE BOOL INTERNAL FORCE)
 
 add_library(XrdCephPosix SHARED
   XrdCephPosix.cc XrdCephPosix.hh
-  XrdCephBulkAioRead.cc XrdCephBulkAioRead.hh
-  )
+  XrdCephBulkAioRead.cc XrdCephBulkAioRead.hh)
+
 
 target_compile_options(XrdCephPosix
   PRIVATE -Wno-deprecated-declarations)
@@ -29,7 +29,7 @@ target_link_libraries(XrdCephPosix
   PRIVATE XrdUtils ${RADOS_LIBS})
 
 target_include_directories(XrdCephPosix
-  PUBLIC ${RADOS_INCLUDE_DIR} $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/src>)
+  PUBLIC ${RADOS_INCLUDE_DIR} $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>)
 
 set_target_properties(XrdCephPosix
   PROPERTIES VERSION 5.7.0 SOVERSION 0)

@@ -20,7 +20,6 @@
 
 #include <string>
 
-#include "XrdSys/XrdSysPthread.hh"
 #include "XrdPfcIO.hh"
 #include "XrdPfc.hh"
 #include "XrdPfcStats.hh"
@@ -28,7 +27,7 @@
 
 class XrdSysError;
 class XrdOssDF;
-class XrdOucIOVec;
+struct XrdOucIOVec;
 
 namespace XrdPfc
 {
@@ -72,7 +71,7 @@ public:
    //! \brief Abstract virtual method of XrdPfc::IO
    //! Called to destruct the IO object after it is no longer used.
    void DetachFinalize() override;
-   
+
    int  Fstat(struct stat &sbuff) override;
 
    long long FSize() override;

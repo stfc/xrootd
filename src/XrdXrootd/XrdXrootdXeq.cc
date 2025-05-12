@@ -105,8 +105,6 @@ struct XrdXrootdSessID
 
 namespace
 {
-static const int op_isOpen    = 0x00010000;
-static const int op_isRead    = 0x00020000;
 
 const char *getTime()
 {
@@ -1424,7 +1422,8 @@ int XrdXrootdProtocol::do_Open()
            }
    else if (opts & kXR_delete)
            {openopts  = SFS_O_TRUNC;   *op++ = 'd'; opC = XROOTD_MON_OPENW;
-            if (opts & kXR_mkdir)     {*op++ = 'm';
+            if (opts & (kXR_mkpath | kXR_async))
+                                      {*op++ = 'm';
                                        mode |= SFS_O_MKPTH;
                                       }
            }
@@ -1458,15 +1457,22 @@ int XrdXrootdProtocol::do_Open()
 //
    doDig = (digFS && SFS_LCLPATH(fn));
 
-// Validate the path and then check if static redirection applies
+// Validate the path/req type and then check if static redirection applies
 //
    if (doDig) {popt = XROOTDXP_NOLK; opC = 0;}
-      else {int ropt;
-            if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
-            if (Route[RD_open1].Host[rdType] && (ropt = RPList.Validate(fn)))
-               return Response.Send(kXR_redirect, Route[ropt].Port[rdType],
-                                                  Route[ropt].Host[rdType]);
-           }
+   else {int ropt = -1;
+     if (!(popt = Squash(fn))) return vpEmsg("Opening", fn);
+     if (Route[RD_open1].Host[rdType])
+       ropt = RPList.Validate(fn);
+     else
+       if (Route[RD_write].Host[rdType] && ('w' == usage || strchr(op, 'd')))
+         ropt = RD_write;
+     if (ropt > 0)
+       return Response.Send(
+         kXR_redirect, Route[ropt].Port[rdType],
+         Route[ropt].Host[rdType]
+       );
+   }
 
 // Add the multi-write option if this path supports it
 //
@@ -2806,7 +2812,7 @@ int XrdXrootdProtocol::do_Set_Cache(XrdOucTokenizer &setargs)
 {
    XrdOucErrInfo myError(Link->ID, Monitor.Did, clientPV);
    XrdSfsFSctl myData;
-   char *cmd, *cargs, *opaque;
+   char *cmd, *cargs, *opaque = nullptr;
    const char *myArgs[2];
 
 // This set is valid only if we implement a cache

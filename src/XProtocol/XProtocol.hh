@@ -1224,7 +1224,8 @@ enum XStatRespFlags {
    kXR_readable=16,
    kXR_writable=32,
    kXR_poscpend=64,
-   kXR_bkpexist=128
+   kXR_bkpexist=128,
+   kXR_cachersp=512
 };
   
 /******************************************************************************/
@@ -1371,6 +1372,8 @@ static int mapError(int rc)
            case ENOSPC:        return kXR_NoSpace;
            case ENAMETOOLONG:  return kXR_ArgTooLong;
            case ENETUNREACH:   return kXR_noserver;
+           case EHOSTUNREACH:  return kXR_noserver;
+           case ECONNREFUSED:  return kXR_noserver;
            case ENOTBLK:       return kXR_NotFile;
            case ENOTSUP:       return kXR_Unsupported;
            case EISDIR:        return kXR_isDirectory;

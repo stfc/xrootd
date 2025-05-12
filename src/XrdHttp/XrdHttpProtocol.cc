@@ -57,6 +57,7 @@
 
 #define XRHTTP_TK_GRACETIME     600
 
+XrdVERSIONINFO(XrdHttpProtocol, xrdhttp);
 
 /******************************************************************************/
 /*                               G l o b a l s                                */
@@ -85,6 +86,7 @@ bool XrdHttpProtocol::listdeny = false;
 bool XrdHttpProtocol::embeddedstatic = true;
 char *XrdHttpProtocol::staticredir = 0;
 XrdOucHash<XrdHttpProtocol::StaticPreloadInfo> *XrdHttpProtocol::staticpreload = 0;
+XrdSciTokensRedir *XrdHttpProtocol::m_redir = nullptr;
 
 kXR_int32 XrdHttpProtocol::myRole = kXR_isManager;
 bool XrdHttpProtocol::selfhttps2http = false;
@@ -104,6 +106,7 @@ int XrdHttpProtocol::exthandlercnt = 0;
 std::map< std::string, std::string > XrdHttpProtocol::hdr2cgimap; 
 
 bool XrdHttpProtocol::usingEC = false;
+bool XrdHttpProtocol::hasCache= false;
 
 XrdScheduler *XrdHttpProtocol::Sched = 0; // System scheduler
 XrdBuffManager *XrdHttpProtocol::BPool = 0; // Buffer manager
@@ -116,6 +119,9 @@ XrdNetPMark * XrdHttpProtocol::pmarkHandle = nullptr;
 XrdHttpChecksumHandler XrdHttpProtocol::cksumHandler = XrdHttpChecksumHandler();
 XrdHttpReadRangeHandler::Configuration XrdHttpProtocol::ReadRangeConfig;
 bool XrdHttpProtocol::tpcForwardCreds = false;
+
+decltype(XrdHttpProtocol::m_staticheader_map) XrdHttpProtocol::m_staticheader_map;
+decltype(XrdHttpProtocol::m_staticheaders) XrdHttpProtocol::m_staticheaders;
 
 XrdSysTrace XrdHttpTrace("http");
 
@@ -788,7 +794,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         nfo = CurrentReq.opaque->Get("xrdhttpname");
         if (nfo) {
           TRACEI(DEBUG, " Setting name: " << nfo);
-          SecEntity.name = unquote(nfo);
+          SecEntity.name = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting name: " << SecEntity.name);
         }
         
@@ -796,42 +802,42 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         if (nfo) {
           TRACEI(DEBUG, " Setting host: " << nfo);
           if (SecEntity.host) free(SecEntity.host);
-          SecEntity.host = unquote(nfo);
+          SecEntity.host = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting host: " << SecEntity.host);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpdn");
         if (nfo) {
           TRACEI(DEBUG, " Setting dn: " << nfo);
-          SecEntity.moninfo = unquote(nfo);
+          SecEntity.moninfo = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting dn: " << SecEntity.moninfo);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttprole");
         if (nfo) {
           TRACEI(DEBUG, " Setting role: " << nfo);
-          SecEntity.role = unquote(nfo);
+          SecEntity.role = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting role: " << SecEntity.role);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttpgrps");
         if (nfo) {
           TRACEI(DEBUG, " Setting grps: " << nfo);
-          SecEntity.grps = unquote(nfo);
+          SecEntity.grps = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting grps: " << SecEntity.grps);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpendorsements");
         if (nfo) {
           TRACEI(DEBUG, " Setting endorsements: " << nfo);
-          SecEntity.endorsements = unquote(nfo);
+          SecEntity.endorsements = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting endorsements: " << SecEntity.endorsements);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpcredslen");
         if (nfo) {
           TRACEI(DEBUG, " Setting credslen: " << nfo);
-          char *s1 = unquote(nfo);
+          char *s1 = strdup(decode_str(nfo).c_str());
           if (s1 && s1[0]) {
             SecEntity.credslen = atoi(s1);
             TRACEI(REQ, " Setting credslen: " << SecEntity.credslen);
@@ -843,7 +849,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
           nfo = CurrentReq.opaque->Get("xrdhttpcreds");
           if (nfo) {
             TRACEI(DEBUG, " Setting creds: " << nfo);
-            SecEntity.creds = unquote(nfo);
+            SecEntity.creds = strdup(decode_str(nfo).c_str());
             TRACEI(REQ, " Setting creds: " << SecEntity.creds);
           }
         }
@@ -1072,11 +1078,13 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
       else if TS_Xeq("listingredir", xlistredir);
       else if TS_Xeq("staticredir", xstaticredir);
       else if TS_Xeq("staticpreload", xstaticpreload);
+      else if TS_Xeq("staticheader", xstaticheader);
       else if TS_Xeq("listingdeny", xlistdeny);
       else if TS_Xeq("header2cgi", xheader2cgi);
       else if TS_Xeq("httpsmode", xhttpsmode);
       else if TS_Xeq("tlsreuse", xtlsreuse);
       else if TS_Xeq("auth", xauth);
+      else if TS_Xeq("redirtoken", xredirtoken);
       else {
         eDest.Say("Config warning: ignoring unknown directive '", var, "'.");
         Config.Echo();
@@ -1103,6 +1111,32 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
 
 // Test if XrdEC is loaded
    if (getenv("XRDCL_EC")) usingEC = true;
+
+// Pre-compute the static headers
+//
+  const auto default_verb = m_staticheader_map.find("");
+  std::string default_static_headers;
+  if (default_verb != m_staticheader_map.end()) {
+    for (const auto &header_entry : default_verb->second) {
+      default_static_headers += header_entry.first + ": " + header_entry.second + "\r\n";
+    }
+  }
+  m_staticheaders[""] = default_static_headers;
+  for (const auto &item : m_staticheader_map) {
+    if (item.first.empty()) {
+      continue; // Skip default case; already handled
+    }
+    auto headers = default_static_headers;
+    for (const auto &header_entry : item.second) {
+      headers += header_entry.first + ": " + header_entry.second + "\r\n";
+    }
+
+    m_staticheaders[item.first] = headers;
+  }
+
+// Test if this is a caching server
+//
+   if (myEnv->Get("XrdCache")) hasCache = true;
 
 // If https was disabled, then issue a warning message if xrdtls configured
 // of it's disabled because httpsmode was auto and xrdtls was not configured.
@@ -1569,15 +1603,20 @@ int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *hea
   } else {
     if (code == 200) ss << "OK";
     else if (code == 100) ss << "Continue";
+    else if (code == 201) ss << "Created";
     else if (code == 206) ss << "Partial Content";
     else if (code == 302) ss << "Redirect";
     else if (code == 307) ss << "Temporary Redirect";
     else if (code == 400) ss << "Bad Request";
+    else if (code == 401) ss << "Unauthorized";
     else if (code == 403) ss << "Forbidden";
     else if (code == 404) ss << "Not Found";
     else if (code == 405) ss << "Method Not Allowed";
+    else if (code == 409) ss << "Conflict";
     else if (code == 416) ss << "Range Not Satisfiable";
+    else if (code == 423) ss << "Locked";
     else if (code == 500) ss << "Internal Server Error";
+    else if (code == 502) ss << "Bad Gateway";
     else if (code == 504) ss << "Gateway Timeout";
     else ss << "Unknown";
   }
@@ -1588,6 +1627,13 @@ int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *hea
     ss << "Connection: Close" << crlf;
 
   ss << "Server: XrootD/" << XrdVSTRING << crlf;
+
+  const auto iter = m_staticheaders.find(CurrentReq.requestverb);
+  if (iter != m_staticheaders.end()) {
+    ss << iter->second;
+  } else {
+    ss << m_staticheaders[""];
+  }
   
   if ((bodylen >= 0) && (code != 100))
     ss << "Content-Length: " << bodylen << crlf;
@@ -2540,6 +2586,72 @@ int XrdHttpProtocol::xstaticpreload(XrdOucStream & Config) {
 }
 
 /******************************************************************************/
+/*                             x s t a t i c h e a d e r                      */
+/******************************************************************************/
+
+//
+// xstaticheader parses the http.staticheader director with the following syntax:
+//
+// http.staticheader [-verb=[GET|HEAD|...]]* header [value]
+//
+// When set, this will cause XrdHttp to always return the specified header and
+// value.
+//
+// Setting this option multiple times is additive (multiple headers may be set).
+// Omitting the value will cause the static header setting to be unset.
+//
+// Omitting the -verb argument will cause it the header to be set unconditionally
+// for all requests.
+int XrdHttpProtocol::xstaticheader(XrdOucStream & Config) {
+  auto val = Config.GetWord();
+  std::vector<std::string> verbs;
+  while (true) {
+    if (!val || !val[0]) {
+      eDest.Emsg("Config", "http.staticheader requires the header to be specified");
+      return 1;
+    }
+
+    std::string match_verb;
+    std::string_view val_str(val);
+    if (val_str.substr(0, 6) == "-verb=") {
+      verbs.emplace_back(val_str.substr(6));
+    } else if (val_str == "-") {
+      eDest.Emsg("Config", "http.staticheader is ignoring unknown flag: ", val_str.data());
+    } else {
+      break;
+    }
+
+    val = Config.GetWord();
+  }
+  if (verbs.empty()) {
+    verbs.emplace_back();
+  }
+
+  std::string header = val;
+
+  val = Config.GetWord();
+  std::string header_value;
+  if (val && val[0]) {
+    header_value = val;
+  }
+
+  for (const auto &verb : verbs) {
+    auto iter = m_staticheader_map.find(verb);
+    if (iter == m_staticheader_map.end()) {
+      if (!header_value.empty())
+        m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
+    } else if (header_value.empty()) {
+      iter->second.clear();
+    } else {
+      iter->second.emplace_back(header, header_value);
+    }
+  }
+
+  return 0;
+}
+
+
+/******************************************************************************/
 /*                          x s e l f h t t p s 2 h t t p                     */
 /******************************************************************************/
 
@@ -2862,6 +2974,43 @@ int XrdHttpProtocol::xauth(XrdOucStream &Config) {
       eDest.Emsg("Config", "http.auth value is invalid"); return 1;
     }
   }
+  return 0;
+}
+
+/******************************************************************************/
+/*                           x r e d i r t o k e n                            */
+/******************************************************************************/
+
+/* Function: xredirtoken
+
+   Purpose:  Parses the `http.redirtoken` directive
+
+            `rediretoken` is curently a boolean; setting the directive enables
+            the functionality.  When enabled, an incoming token will be stripped
+            from the `authz` query parameter and replaced with an equivalent
+            macaroon.
+
+   Output: 0 upon success or 1 upon failure.
+ */
+int XrdHttpProtocol::xredirtoken(XrdOucStream &Config) {
+  auto val = Config.GetWord();
+  if (!val || !val[0])
+  {
+    val = (char *)"libXrdAccSciTokens.so";
+  }
+
+
+  char eMsgBuff[2048];
+  XrdVersionInfo *myVer = &XrdVERSIONINFOVAR(XrdHttpProtocol);
+  XrdOucPinLoader myLib(eMsgBuff, sizeof(eMsgBuff), myVer,
+                        "http.redirtoken", val);
+  auto redir = (XrdSciTokensRedir **)(myLib.Resolve("SciTokensRedir"));
+  if (redir == nullptr) {
+    eDest.Emsg("redirtoken", "Failed to resolve the SciTokenRedir symbol in token library");
+    return 1;
+  }
+
+  m_redir = *redir;
   return 0;
 }
 

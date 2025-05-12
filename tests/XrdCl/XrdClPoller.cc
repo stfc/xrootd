@@ -216,13 +216,11 @@ TEST(PollerTest, FunctionTest)
   //----------------------------------------------------------------------------
   Server server( Server::Both );
   Socket s[3];
-  uint16_t port = 9996; // was 9999, but we need to change ports from other
-                        // tests so that we can run all of them in parallel.
-                        // Will find another, better way to ensure this in the future
-  EXPECT_TRUE( server.Setup( port, 3, new RandomPumpHandlerFactory() ) );
+  EXPECT_TRUE( server.Setup( 0, 3, new RandomPumpHandlerFactory() ) );
   EXPECT_TRUE( server.Start() );
   EXPECT_TRUE( poller->Initialize() );
   EXPECT_TRUE( poller->Start() );
+  ASSERT_NE(0, server.GetPort());
 
   //----------------------------------------------------------------------------
   // Connect the sockets
@@ -231,27 +229,25 @@ TEST(PollerTest, FunctionTest)
   for( int i = 0; i < 3; ++i )
   {
     EXPECT_XRDST_OK( s[i].Initialize() );
-    EXPECT_XRDST_OK( s[i].Connect( "localhost", port ) );
+    EXPECT_XRDST_OK( s[i].Connect( "localhost", server.GetPort() ) );
     EXPECT_TRUE( poller->AddSocket( &s[i], handler ) );
     EXPECT_TRUE( poller->EnableReadNotification( &s[i], true, 60 ) );
     EXPECT_TRUE( poller->IsRegistered( &s[i] ) );
   }
 
   //----------------------------------------------------------------------------
-  // All the business happens elsewhere so we have nothing better to do
-  // here that wait, otherwise server->stop will hang.
-  //----------------------------------------------------------------------------
-  ::sleep(1);
-
-  //----------------------------------------------------------------------------
   // Cleanup
   //----------------------------------------------------------------------------
-  EXPECT_TRUE( poller->Stop() );
   EXPECT_TRUE( server.Stop() );
+  EXPECT_TRUE( poller->Stop() );
   EXPECT_TRUE( poller->Finalize() );
+
+  for( int i = 0; i < 3; ++i )
+    s[i].Close();
 
   std::pair<uint64_t, uint32_t> stats[3];
   std::pair<uint64_t, uint32_t> statsServ[3];
+
   for( int i = 0; i < 3; ++i )
   {
     EXPECT_TRUE( !poller->IsRegistered( &s[i] ) );
@@ -260,9 +256,6 @@ TEST(PollerTest, FunctionTest)
     EXPECT_EQ( stats[i].first, statsServ[i].first );
     EXPECT_EQ( stats[i].second, statsServ[i].second );
   }
-
-  for( int i = 0; i < 3; ++i )
-    s[i].Close();
 
   delete handler;
   delete poller;
