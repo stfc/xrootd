@@ -149,6 +149,8 @@ unsigned int g_nextCephFd = 0;
 XrdSysMutex g_fd_mutex;
 /// mutex protecting initialization of ceph clusters
 XrdSysMutex g_init_mutex;
+/// mutex protecting checksum log file
+XrdSysMutex g_logAdler32;
 
 //JW Counter for number of times a given cluster is resolved.
 std::map<unsigned int, unsigned long long> g_idxCntr;
@@ -863,6 +865,7 @@ int ceph_posix_close(int fd) {
 
         if (g_logStreamedAdler32) {
 	  const char *path = strdup((fr->pool + ":" + fr->name).c_str());
+	  XrdSysMutexHelper lock(g_logAdler32);
           fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339(), path, "streamed", "adler32", adler32Cks);
           fflush(g_cksLogFile);
         }
