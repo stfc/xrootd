@@ -55,7 +55,7 @@
 #include "XrdCeph/XrdCephBulkAioRead.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
 #include "XrdCks/XrdCksData.hh"
-
+#include "XrdCks/XrdCksCalcadler32.hh"
 #include <XrdCks/XrdCksAssist.hh>
 
 char *ts_rfc3339() {
@@ -720,7 +720,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
 
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
-
+  fr.writingData = false;
   struct stat buf;
   libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
   if (NULL == striper) {
