@@ -140,7 +140,7 @@ namespace XrdCl
         Log *log = DefaultEnv::GetLog();
         log->Warning( ExDbgMsg, "[%s] MsgHandler is examining a response although "
                                 "it already owns a response: %p (message: %s ).",
-                      pUrl.GetHostId().c_str(), this,
+                      pUrl.GetHostId().c_str(), (void*)this,
                       pRequest->GetObfuscatedDescription().c_str() );
       }
     }
@@ -819,7 +819,7 @@ namespace XrdCl
         if( resendTime < pExpiration )
         {
           log->Debug( ExDbgMsg, "[%s] Scheduling WaitTask for MsgHandler: %p (message: %s ).",
-                      pUrl.GetHostId().c_str(), this,
+                      pUrl.GetHostId().c_str(), (void*)this,
                       pRequest->GetObfuscatedDescription().c_str() );
 
           TaskManager *taskMgr = pPostMaster->GetTaskManager();
@@ -914,7 +914,9 @@ namespace XrdCl
 
   //----------------------------------------------------------------------------
   // We're here when we requested sending something over the wire
-  // and there has been a status update on this action
+  // or other status update on this action.
+  // We can be called when message is still in out-queue, with an
+  // error status indicating message will not be sent.
   //----------------------------------------------------------------------------
   void XRootDMsgHandler::OnStatusReady( const Message *message,
                                         XRootDStatus   status )
@@ -922,6 +924,18 @@ namespace XrdCl
     Log *log = DefaultEnv::GetLog();
 
     const int sst = pSendingState.fetch_or( kSendDone );
+
+    // if we have already seen a response we can not be in the out-queue
+    // anymore, so we should be getting notified of a successful send.
+    // But if not, log and do our best to recover.
+    if( !status.IsOK() && ( ( sst & kFinalResp ) || ( sst & kSawResp ) ) )
+    {
+      log->Error( XRootDMsg, "[%s] Unexpected error for message %s. Trying to "
+                  "recover.", pUrl.GetHostId().c_str(),
+                  message->GetObfuscatedDescription().c_str() );
+      HandleError( status );
+      return;
+    }
 
     if( sst & kFinalResp )
     {
@@ -1161,7 +1175,7 @@ namespace XrdCl
       // confirmation the original request was sent (via OnStatusReady).
       // The final processing will be triggered when we get the confirm.
       const int sst = pSendingState.fetch_or( kFinalResp );
-      if( !( sst & kSendDone ) )
+      if( ( sst & kSawReadySend ) && !( sst & kSendDone ) )
         return;
     }
 
@@ -1175,7 +1189,7 @@ namespace XrdCl
     Log *log = DefaultEnv::GetLog();
     log->Debug( ExDbgMsg, "[%s] Calling MsgHandler: %p (message: %s ) "
                 "with status: %s.",
-                pUrl.GetHostId().c_str(), this,
+                pUrl.GetHostId().c_str(), (void*)this,
                 pRequest->GetObfuscatedDescription().c_str(),
                 status->ToString().c_str() );
 
@@ -1704,7 +1718,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       case kXR_readv:
       {
-        log->Dump( XRootDMsg, "[%s] Parsing the response to %p as "
+        log->Dump( XRootDMsg, "[%s] Parsing the response to %s as "
                    "VectorReadInfo", pUrl.GetHostId().c_str(),
                    pRequest->GetObfuscatedDescription().c_str() );
 
@@ -2129,6 +2143,10 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   Status XRootDMsgHandler::RetryAtServer( const URL &url, RedirectEntry::Type entryType )
   {
+    // prepare to possibly be requeued in the out-queue for a different channel,
+    // so reset sendingstate.
+    pSendingState = 0;
+
     pResponse.reset();
     Log *log = DefaultEnv::GetLog();
 
@@ -2178,7 +2196,7 @@ namespace XrdCl
     if( pUrl.IsMetalink() && pFollowMetalink )
     {
       log->Debug( ExDbgMsg, "[%s] Metaling redirection for MsgHandler: %p (message: %s ).",
-                  pUrl.GetHostId().c_str(), this,
+                  pUrl.GetHostId().c_str(), (void*)this,
                   pRequest->GetObfuscatedDescription().c_str() );
 
       return pPostMaster->Redirect( pUrl, pRequest, this );
@@ -2191,7 +2209,7 @@ namespace XrdCl
     else
     {
       log->Debug( ExDbgMsg, "[%s] Retry at server MsgHandler: %p (message: %s ).",
-                  pUrl.GetHostId().c_str(), this,
+                  pUrl.GetHostId().c_str(), (void*)this,
                   pRequest->GetObfuscatedDescription().c_str() );
       return pPostMaster->Send( pUrl, pRequest, this, true, pExpiration );
     }
@@ -2298,7 +2316,7 @@ namespace XrdCl
       // confirmation the original request was sent (via OnStatusReady).
       // The final processing will be triggered when we get the confirm.
       const int sst = pSendingState.fetch_or( kFinalResp );
-      if( !( sst & kSendDone ) )
+      if( ( sst & kSawReadySend ) && !( sst & kSendDone ) )
         return;
     }
 
@@ -2309,7 +2327,7 @@ namespace XrdCl
     {
       Log *log = DefaultEnv::GetLog();
       log->Debug( ExDbgMsg, "[%s] Passing to the thread-pool MsgHandler: %p (message: %s ).",
-                  pUrl.GetHostId().c_str(), this,
+                  pUrl.GetHostId().c_str(), (void*)this,
                   pRequest->GetObfuscatedDescription().c_str() );
       jobMgr->QueueJob( new HandleRspJob( this ), 0 );
     }
@@ -2322,7 +2340,7 @@ namespace XrdCl
   {
     Log *log = DefaultEnv::GetLog();
     log->Debug( ExDbgMsg, "[%s] Handling local redirect - MsgHandler: %p (message: %s ).",
-                pUrl.GetHostId().c_str(), this,
+                pUrl.GetHostId().c_str(), (void*)this,
                 pRequest->GetObfuscatedDescription().c_str() );
 
     if( !pLFileHandler )

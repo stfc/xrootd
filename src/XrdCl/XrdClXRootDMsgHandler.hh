@@ -185,7 +185,7 @@ namespace XrdCl
 
         Log *log = DefaultEnv::GetLog();
         log->Debug( ExDbgMsg, "[%s] MsgHandler created: %p (message: %s ).",
-                    pUrl.GetHostId().c_str(), this,
+                    pUrl.GetHostId().c_str(), (void*)this,
                     pRequest->GetObfuscatedDescription().c_str() );
 
         ClientRequestHdr *hdr = (ClientRequestHdr*)pRequest->GetBuffer();
@@ -224,7 +224,7 @@ namespace XrdCl
 
         Log *log = DefaultEnv::GetLog();
         log->Debug( ExDbgMsg, "[%s] Destroying MsgHandler: %p.",
-                    pUrl.GetHostId().c_str(), this );
+                    pUrl.GetHostId().c_str(), (void*)this );
       }
 
       //------------------------------------------------------------------------
@@ -432,15 +432,16 @@ namespace XrdCl
 
       void OnReadyToSend( [[maybe_unused]] Message *msg ) override
       {
-        pSendingState = 0;
+        pSendingState |= kSawReadySend;
       }
 
     private:
 
       // bit flags used with pSendingState
-      static constexpr int kSendDone   = 0x0001;
-      static constexpr int kSawResp    = 0x0002;
-      static constexpr int kFinalResp  = 0x0004;
+      static constexpr int kSendDone     = 0x0001;
+      static constexpr int kSawResp      = 0x0002;
+      static constexpr int kFinalResp    = 0x0004;
+      static constexpr int kSawReadySend = 0x0008;
 
       //------------------------------------------------------------------------
       //! Recover error

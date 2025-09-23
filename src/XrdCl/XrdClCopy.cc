@@ -370,6 +370,7 @@ const char *FileType2String( XrdCpFile::PType type )
     case XrdCpFile::isDir:   return "directory";
     case XrdCpFile::isFile:  return "local file";
     case XrdCpFile::isXroot: return "xroot";
+    case XrdCpFile::isXroots: return "xroots";
     case XrdCpFile::isHttp:  return "http";
     case XrdCpFile::isHttps: return "https";
     case XrdCpFile::isStdIO: return "stdio";
@@ -725,7 +726,7 @@ int main( int argc, char **argv )
         targetIsDir = true;
       targetExists = true;
     }
-    else if( st.errNo == kXR_NotFound && config.Want( XrdCpConfig::DoPath ) )
+    else if( st.errNo == kXR_NotFound && makedir )
     {
       int n = strlen(config.dstFile->Path);
       if( config.dstFile->Path[n-1] == '/' )
@@ -768,7 +769,8 @@ int main( int argc, char **argv )
   //----------------------------------------------------------------------------
   bool remoteSrcIsDir = false;
   if( config.Want( XrdCpConfig::DoRecurse ) &&
-      config.srcFile->Protocol == XrdCpFile::isXroot )
+      (config.srcFile->Protocol == XrdCpFile::isXroot ||
+       config.srcFile->Protocol == XrdCpFile::isXroots) )
   {
     URL          source( config.srcFile->Path );
     FileSystem  *fs       = new FileSystem( source );

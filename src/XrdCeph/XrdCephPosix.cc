@@ -217,7 +217,7 @@ CephFileRef* getFileRef(int fd) {
 /// deletes a FileRef from the global table of file descriptors
 void deleteFileRef(int fd, const CephFileRef &fr) {
   XrdSysMutexHelper lock(g_fd_mutex);
-  if (fr.flags & (O_WRONLY|O_RDWR)) {
+  if ((fr.flags & O_ACCMODE) != O_RDONLY) {
     g_filesOpenForWrite.erase(g_filesOpenForWrite.find(fr.name));
   }
   std::map<unsigned int, CephFileRef>::iterator it = g_fds.find(fd);
@@ -234,7 +234,7 @@ int insertFileRef(CephFileRef &fr) {
   XrdSysMutexHelper lock(g_fd_mutex);
   g_fds[g_nextCephFd] = fr;
   g_nextCephFd++;
-  if (fr.flags & (O_WRONLY|O_RDWR)) {
+  if ((fr.flags & O_ACCMODE) != O_RDONLY) {
     g_filesOpenForWrite.insert(fr.name);
   }
   return g_nextCephFd-1;
@@ -736,7 +736,7 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
 
   logwrapper((char*)"Access Mode: %s flags&O_ACCMODE %d ", pathname, flags);
 
-  if ((flags&O_ACCMODE) == O_RDONLY) {  // Access mode is READ
+  if ((flags & O_ACCMODE) == O_RDONLY) {  // Access mode is READ
 
     if (fileExists) {
       librados::bufferlist d_stripeUnit;
@@ -854,14 +854,13 @@ int ceph_posix_close(int fd) {
                fr->asyncRdCompletionCount, fr->asyncRdStartCount, fr->bytesWritten,  fr->maxOffsetWritten,
                fr->longestAsyncWriteTime, fr->longestCallbackInvocation, (lastAsyncAge));
 
-    if (fr->writingData) {
-      if (g_calcStreamedAdler32) {
+    if (fr->writingData && g_calcStreamedAdler32) {
 
-	unsigned long adlerULong;
-	memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
-	const char* adler32Cks = formatAdler32(adlerULong);
+	    unsigned long adlerULong;
+	    memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
+	    const char* adler32Cks = formatAdler32(adlerULong);
 
-  	logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks);
+  	  logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks);
 
         if (g_logStreamedAdler32) {
 	  const char *path = strdup((fr->pool + ":" + fr->name).c_str());
@@ -870,14 +869,14 @@ int ceph_posix_close(int fd) {
           fflush(g_cksLogFile);
         }
 
-        if (g_storeStreamedAdler32) {
-          int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
-          if (rc != 0) {
-            logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
-          }
-        }
-        delete fr->cksCalcadler32;
+
+      if (g_storeStreamedAdler32) {
+        int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
+        if (rc != 0) {
+          logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
+         }
       }
+      delete fr->cksCalcadler32;
     }
 
     deleteFileRef(fd, *fr);
@@ -925,7 +924,7 @@ ssize_t ceph_posix_write(int fd, const void *buf, size_t count) {
   CephFileRef* fr = getFileRef(fd);
   if (fr) {
     logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
-    if ((fr->flags & (O_WRONLY|O_RDWR)) == 0) {
+    if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
     libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
@@ -954,9 +953,9 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
   CephFileRef* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_posix_pwrite: for fd %d, count=%d", fd, count);
 
-    if ((fr->flags & (O_WRONLY|O_RDWR)) == 0) {
+    //logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
+    if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
     libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
@@ -971,12 +970,10 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
     fr->bytesWritten+=count;
-    if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
-
-    if (g_calcStreamedAdler32) {
+    if (g_calcStreamedAdler32 && ( fr->maxOffsetWritten == offset + count -1 ) ) {
       fr->cksCalcadler32->Update((const char*)buf, count);
     }
-
+    if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
     return count;
   } else {
     return -EBADF;
@@ -1021,8 +1018,9 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
     const char *buf = (const char*)aiop->sfsAio.aio_buf;
     size_t offset = aiop->sfsAio.aio_offset;
     // TODO implement proper logging level for this plugin - this should be only debug
-    logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
-    if ((fr->flags & (O_WRONLY|O_RDWR)) == 0) {
+
+    //logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
+    if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
     // get the striper object
@@ -1051,9 +1049,10 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
     fr->asyncWrStartCount++;
     ::gettimeofday(&fr->lastAsyncSubmission, nullptr);
     fr->bytesAsyncWritePending+=count;
-    if (g_calcStreamedAdler32) {
-      fr->cksCalcadler32->Update((const char*)buf, count);
-    }
+    // disable streamed checksums for aio writes as it's too risky
+    //if (g_calcStreamedAdler32) {
+    //  fr->cksCalcadler32->Update((const char*)buf, count);
+    // }
     return rc;
   } else {
     return -EBADF;
@@ -1065,7 +1064,7 @@ ssize_t ceph_nonstriper_readv(int fd, XrdOucIOVec *readV, int n) {
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_WRONLY) != 0) {
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
       return -EBADF;
     }
     if (fr->nbStripes != 1) {
@@ -1141,7 +1140,7 @@ ssize_t ceph_posix_read(int fd, void *buf, size_t count) {
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_WRONLY) != 0) {
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
       return -EBADF;
     }
     libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
@@ -1168,7 +1167,7 @@ ssize_t ceph_posix_nonstriper_pread(int fd, void *buf, size_t count, off64_t off
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_WRONLY) != 0) {
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
       return -EBADF;
     }
     if (fr->nbStripes != 1) {
@@ -1228,7 +1227,7 @@ ssize_t ceph_posix_pread(int fd, void *buf, size_t count, off64_t offset) {
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_WRONLY) != 0) {
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
       return -EBADF;
     }
     libradosstriper::RadosStriper *striper = getRadosStriper(*fr);
@@ -1296,7 +1295,7 @@ ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
     size_t offset = aiop->sfsAio.aio_offset;
     // TODO implement proper logging level for this plugin - this should be only debug
     //logwrapper((char*)"ceph_aio_read: for fd %d, count=%d", fd, count);
-    if ((fr->flags & O_WRONLY) != 0) {
+    if ((fr->flags & O_ACCMODE) == O_WRONLY) {
       return -EBADF;
     }
     // get the striper object
