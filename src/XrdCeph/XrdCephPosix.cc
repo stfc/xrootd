@@ -55,7 +55,7 @@
 #include "XrdCeph/XrdCephBulkAioRead.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
 #include "XrdCks/XrdCksData.hh"
-
+#include "XrdCks/XrdCksCalcadler32.hh"
 #include <XrdCks/XrdCksAssist.hh>
 
 char *ts_rfc3339() {
@@ -149,6 +149,8 @@ unsigned int g_nextCephFd = 0;
 XrdSysMutex g_fd_mutex;
 /// mutex protecting initialization of ceph clusters
 XrdSysMutex g_init_mutex;
+/// mutex protecting checksum log file
+XrdSysMutex g_logAdler32;
 
 //JW Counter for number of times a given cluster is resolved.
 std::map<unsigned int, unsigned long long> g_idxCntr;
@@ -718,7 +720,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
 
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
-
+  fr.writingData = false;
   struct stat buf;
   libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
   if (NULL == striper) {
@@ -860,11 +862,13 @@ int ceph_posix_close(int fd) {
 
   	  logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks);
 
-      if (g_logStreamedAdler32) {
-	    const char *path = strdup((fr->pool + ":" + fr->name).c_str());
-        fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339(), path, "streamed", "adler32", adler32Cks);
-        fflush(g_cksLogFile);
-      }
+        if (g_logStreamedAdler32) {
+	  const char *path = strdup((fr->pool + ":" + fr->name).c_str());
+	  XrdSysMutexHelper lock(g_logAdler32);
+          fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339(), path, "streamed", "adler32", adler32Cks);
+          fflush(g_cksLogFile);
+        }
+
 
       if (g_storeStreamedAdler32) {
         int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
