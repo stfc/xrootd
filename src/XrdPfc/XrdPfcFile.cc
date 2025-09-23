@@ -676,7 +676,7 @@ void File::ProcessBlockRequest(Block *b)
    if (XRD_TRACE What >= TRACE_Dump) {
       char buf[256];
       snprintf(buf, 256, "idx=%lld, block=%p, prefetch=%d, off=%lld, req_size=%d, buff=%p, resp_handler=%p ",
-         b->get_offset()/m_block_size, b, b->m_prefetch, b->get_offset(), b->get_req_size(), b->get_buff(), brh);
+         b->get_offset()/m_block_size, (void*)b, b->m_prefetch, b->get_offset(), b->get_req_size(), (void*)b->get_buff(), (void*)brh);
       TRACEF(Dump, "ProcessBlockRequest() " << buf);
    }
 
@@ -1115,8 +1115,6 @@ void File::WriteBlockToDisk(Block* b)
          m_cfi.ResetCkSumNet();
       }
 
-      dec_ref_count(b);
-
       // Set synced bit or stash block index if in actual sync.
       // Synced state is only written out to cinfo file when data file is synced.
       if (m_in_sync)
@@ -1135,11 +1133,19 @@ void File::WriteBlockToDisk(Block* b)
             m_non_flushed_cnt = 0;
          }
       }
+      // As soon as the reference count is decreased on the block, the
+      // file object may be deleted.  Thus, to avoid holding both locks at a time,
+      // we defer the ref count decrease until later if a sync is needed
+      if (!schedule_sync) {
+         dec_ref_count(b);
+      }
    }
 
    if (schedule_sync)
    {
       cache()->ScheduleFileSync(this);
+      XrdSysCondVarHelper _lck(m_state_cond);
+      dec_ref_count(b);
    }
 }
 

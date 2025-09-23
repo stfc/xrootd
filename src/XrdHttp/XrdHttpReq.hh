@@ -69,10 +69,48 @@ class XrdHttpProtocol;
 class XrdOucEnv;
 
 class XrdHttpReq : public XrdXrootd::Bridge::Result {
+
+public:
+  // ----------------
+  // Description of the request. The header/body parsing
+  // is supposed to populate these fields, for fast access while
+  // processing the request
+
+  /// These are the HTTP/DAV requests that we support
+
+  enum ReqType: int {
+    rtUnset = -1,
+    rtUnknown = 0,
+    rtMalformed,
+    rtGET,
+    rtHEAD,
+    rtPUT,
+    rtOPTIONS,
+    rtPATCH,
+    rtDELETE,
+    rtPROPFIND,
+    rtMKCOL,
+    rtMOVE,
+    rtPOST
+  };
+
 private:
   // HTTP response parameters to be sent back to the user
   int httpStatusCode;
-  std::string httpStatusText;
+  // HTTP Error code for the response
+  // e.g. 8.1, 8.3.1, etc.
+  // https://twiki.cern.ch/twiki/bin/view/LCG/WebdavErrorImprovement
+  std::string httpErrorCode;
+  // HTTP response text with following format:
+  // Severity: ErrorCode: free-style text message
+  // Severity being OK, WARNING, or ERROR
+  // ErrorCode being a decimal numeric plus dot string, i.e. n or n.m or n.m.l,
+  // etc. free-style text message any UTF-8 string
+  // Optionally, it also contains the trailer headers whereever applicable
+  // e.g. X-Transfer-Status: 200: OK
+  // or X-Transfer-Status: 500: ERROR: <error message>: <additional text>
+  std::string httpErrorBody;
+
 
   // The value of the user agent, if specified
   std::string m_user_agent;
@@ -126,7 +164,13 @@ private:
   void parseResource(char *url);
   // Map an XRootD error code to an appropriate HTTP status code and message
   void mapXrdErrorToHttpStatus();
-  
+
+  // Set Webdav Error messages
+  void sendWebdavErrorMessage(XResponseType xrdresp, XErrorCode xrderrcode,
+                              ReqType httpVerb, XRequestTypes xrdOperation,
+                              std::string etext, const char *desc,
+                              const char *header_to_add, bool keepalive);
+
   // Sanitize the resource from http[s]://[host]/ questionable prefix
   void sanitizeResourcePfx();
 
@@ -145,7 +189,7 @@ private:
 
   // If requested by the client, sends any I/O errors that occur during the transfer
   // into a footer.
-  void sendFooterError(const std::string &);
+  int sendFooterError(const std::string &);
 
   // Set the age header from the file modification time
   void addAgeHeader(std::string & headers);
@@ -166,7 +210,7 @@ private:
 
 public:
   XrdHttpReq(XrdHttpProtocol *protinstance, const XrdHttpReadRangeHandler::Configuration &rcfg) :
-      readRangeHandler(rcfg), keepalive(true) {
+      readRangeHandler(rcfg), closeAfterError(false), keepalive(true) {
 
     prot = protinstance;
     length = 0;
@@ -208,31 +252,12 @@ public:
 
   void addCgi(const std::string & key, const std::string & value);
 
+  // Set the transfer status header, if requested by the client
+  void setTransferStatusHeader(std::string &header);
+
   // Return the current user agent; if none has been specified, returns an empty string
   const std::string &userAgent() const {return m_user_agent;}
 
-  // ----------------
-  // Description of the request. The header/body parsing
-  // is supposed to populate these fields, for fast access while
-  // processing the request
-
-  /// These are the HTTP/DAV requests that we support
-
-  enum ReqType {
-    rtUnset = -1,
-    rtUnknown = 0,
-    rtMalformed,
-    rtGET,
-    rtHEAD,
-    rtPUT,
-    rtOPTIONS,
-    rtPATCH,
-    rtDELETE,
-    rtPROPFIND,
-    rtMKCOL,
-    rtMOVE,
-    rtPOST
-  };
 
   /// The request we got
   ReqType request;
@@ -256,6 +281,10 @@ public:
   /// Tracking the next ranges of data to read during GET
   XrdHttpReadRangeHandler   readRangeHandler;
   bool                      readClosing;
+
+  // Indication that there was a read error and the next
+  // request processing state should cleanly close the file.
+  bool                      closeAfterError;
 
   bool keepalive;
   long long length;  // Total size from client for PUT; total length of response TO client for GET.
