@@ -194,7 +194,8 @@ void FileCopyTest::UploadTestFunc()
   //----------------------------------------------------------------------------
   FileSystem  fs( url );
   LocationInfo *locations = nullptr;
-  EXPECT_XRDST_OK( fs.DeepLocate( remoteFile, OpenFlags::Refresh, locations ) );
+  OpenFlags::Flags flags = OpenFlags::PrefName | OpenFlags::Refresh;
+  EXPECT_XRDST_OK( fs.DeepLocate( remoteFile, flags, locations ) );
   ASSERT_TRUE( locations );
   EXPECT_NE( locations->GetSize(), 0 );
   FileSystem fs1( locations->Begin()->GetAddress() );
@@ -288,7 +289,7 @@ namespace
       //------------------------------------------------------------------------
       // Job progress
       //------------------------------------------------------------------------
-      virtual void JobProgress( uint16_t jobNum,
+      virtual void JobProgress( uint32_t jobNum,
                                 uint64_t bytesProcessed,
                                 uint64_t bytesTotal )
       {
@@ -299,7 +300,7 @@ namespace
       //------------------------------------------------------------------------
       // Determine whether the job should be canceled
       //------------------------------------------------------------------------
-      virtual bool ShouldCancel( uint16_t jobNum ) { return pCancel; }
+      virtual bool ShouldCancel( uint32_t jobNum ) { return pCancel; }
 
     private:
       bool pCancel;

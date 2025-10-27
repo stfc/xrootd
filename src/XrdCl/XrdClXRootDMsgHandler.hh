@@ -185,7 +185,7 @@ namespace XrdCl
 
         Log *log = DefaultEnv::GetLog();
         log->Debug( ExDbgMsg, "[%s] MsgHandler created: %p (message: %s ).",
-                    pUrl.GetHostId().c_str(), this,
+                    pUrl.GetHostId().c_str(), (void*)this,
                     pRequest->GetObfuscatedDescription().c_str() );
 
         ClientRequestHdr *hdr = (ClientRequestHdr*)pRequest->GetBuffer();
@@ -196,12 +196,18 @@ namespace XrdCl
                                                          ntohl( pgrdreq->rlen ) ) );
         }
 
+        //----------------------------------------------------------------------
+        // Pass the reader our pUrl, not *url. The latter is a reference, likely
+        // from FileStateHandler such as *pDataServer. Accessing that throughout
+        // our lifetime may lead to concurrent access. In the case of read-
+        // recovery the FileStateHandler may entirely reallocate the url object.
+        //----------------------------------------------------------------------
         if( ntohs( hdr->requestid ) == kXR_readv )
-          pBodyReader.reset( new AsyncVectorReader( *url, *pRequest ) );
+          pBodyReader.reset( new AsyncVectorReader( pUrl, *pRequest ) );
         else if( ntohs( hdr->requestid ) == kXR_read )
-          pBodyReader.reset( new AsyncRawReader( *url, *pRequest ) );
+          pBodyReader.reset( new AsyncRawReader( pUrl, *pRequest ) );
         else
-          pBodyReader.reset( new AsyncDiscardReader( *url, *pRequest ) );
+          pBodyReader.reset( new AsyncDiscardReader( pUrl, *pRequest ) );
       }
 
       //------------------------------------------------------------------------
@@ -224,7 +230,7 @@ namespace XrdCl
 
         Log *log = DefaultEnv::GetLog();
         log->Debug( ExDbgMsg, "[%s] Destroying MsgHandler: %p.",
-                    pUrl.GetHostId().c_str(), this );
+                    pUrl.GetHostId().c_str(), (void*)this );
       }
 
       //------------------------------------------------------------------------
@@ -432,15 +438,16 @@ namespace XrdCl
 
       void OnReadyToSend( [[maybe_unused]] Message *msg ) override
       {
-        pSendingState = 0;
+        pSendingState |= kSawReadySend;
       }
 
     private:
 
       // bit flags used with pSendingState
-      static constexpr int kSendDone   = 0x0001;
-      static constexpr int kSawResp    = 0x0002;
-      static constexpr int kFinalResp  = 0x0004;
+      static constexpr int kSendDone     = 0x0001;
+      static constexpr int kSawResp      = 0x0002;
+      static constexpr int kFinalResp    = 0x0004;
+      static constexpr int kSawReadySend = 0x0008;
 
       //------------------------------------------------------------------------
       //! Recover error

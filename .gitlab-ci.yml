@@ -19,11 +19,11 @@ default:
     - debuild --no-tgz-check --no-sign -b
     - apt install -y ../*.d*eb
     - mkdir -p DEB/${ID}/${VERSION_CODENAME}
-    - mv ../*.* DEB/${ID}/${VERSION_CODENAME}
+    - mv ../*.deb DEB/${ID}/${VERSION_CODENAME}
     - tests/post-install.sh
   artifacts:
     paths: [ DEB ]
-    expire_in: 1d
+    expire_in: 1 day
 
 .rpm_build_dnf: &rpm_build_dnf
   stage: build
@@ -39,7 +39,7 @@ default:
     - mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
   artifacts:
     paths: [ RPMS ]
-    expire_in: 1d
+    expire_in: 1 day
 
 Debian 11:
   image: debian:11
@@ -72,8 +72,8 @@ AlmaLinux 9:
     - dnf config-manager --set-enabled crb
   <<: *rpm_build_dnf
 
-AlmaLinux 10 (beta):
-  image: almalinux:10-kitten
+AlmaLinux 10:
+  image: almalinux:10
   before_script:
     - dnf install -y epel-release
     - dnf config-manager --set-enabled crb

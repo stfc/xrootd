@@ -46,8 +46,8 @@ namespace
     XrdSys::IOEvents::CallBack *callBack;
     bool                        readEnabled;
     bool                        writeEnabled;
-    uint16_t                    readTimeout;
-    uint16_t                    writeTimeout;
+    time_t                      readTimeout;
+    time_t                      writeTimeout;
   };
 
   //----------------------------------------------------------------------------
@@ -214,6 +214,8 @@ namespace XrdCl
     while( !pPollerPool.empty() )
     {
       XrdSys::IOEvents::Poller *poller = pPollerPool.back();
+      if( *pNext == poller )
+        pNext = pPollerPool.begin();
       pPollerPool.pop_back();
 
       if( !poller ) continue;
@@ -269,7 +271,7 @@ namespace XrdCl
       return false;
     }
 
-    log->Debug( PollerMsg, "Adding socket %p to the poller", socket );
+    log->Debug( PollerMsg, "Adding socket %p to the poller", (void*)socket );
 
     //--------------------------------------------------------------------------
     // Check if the socket is already registered
@@ -286,6 +288,12 @@ namespace XrdCl
     // Create the socket helper
     //--------------------------------------------------------------------------
     XrdSys::IOEvents::Poller* poller = RegisterAndGetPoller( socket );
+
+    if( !poller )
+    {
+      log->Error( PollerMsg, "No poller available, can not add socket" );
+      return false;
+    }
 
     PollerHelper *helper = new PollerHelper();
     helper->callBack = new ::SocketCallBack( socket, handler );
@@ -353,7 +361,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   bool PollerBuiltIn::EnableReadNotification( Socket  *socket,
                                               bool     notify,
-                                              uint16_t timeout )
+                                              time_t   timeout )
   {
     using namespace XrdSys::IOEvents;
     Log *log = DefaultEnv::GetLog();
@@ -388,8 +396,8 @@ namespace XrdCl
         return true;
       helper->readTimeout = timeout;
 
-      log->Dump( PollerMsg, "%s Enable read notifications, timeout: %d",
-                            socket->GetName().c_str(), timeout );
+      log->Dump( PollerMsg, "%s Enable read notifications, timeout: %lld",
+                            socket->GetName().c_str(), (long long)timeout );
 
       if( poller )
       {
@@ -438,7 +446,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   bool PollerBuiltIn::EnableWriteNotification( Socket  *socket,
                                                bool     notify,
-                                               uint16_t timeout )
+                                               time_t   timeout )
   {
     using namespace XrdSys::IOEvents;
     Log *log = DefaultEnv::GetLog();
@@ -474,8 +482,8 @@ namespace XrdCl
 
       helper->writeTimeout = timeout;
 
-      log->Dump( PollerMsg, "%s Enable write notifications, timeout: %d",
-                            socket->GetName().c_str(), timeout );
+      log->Dump( PollerMsg, "%s Enable write notifications, timeout: %lld",
+                            socket->GetName().c_str(), (long long)timeout );
 
       if( poller )
       {

@@ -16,7 +16,7 @@ License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AN
 URL:		https://xrootd.org
 
 %if !%{with git}
-Version:	5.8.2
+Version:	5.8.4
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
@@ -614,6 +614,7 @@ fi
 %{_libdir}/libXrdFileCache-5.so
 %{_libdir}/libXrdHttp-5.so
 %{_libdir}/libXrdHttpTPC-5.so
+%{_libdir}/libXrdHttpCors-5.so
 %{_libdir}/libXrdMacaroons-5.so
 %{_libdir}/libXrdN2No2p-5.so
 %{_libdir}/libXrdOfsPrepGPI-5.so
@@ -702,6 +703,12 @@ fi
 %endif
 
 %changelog
+
+* Thu Jul 10 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.4-1
+- XRootD 5.8.4
+
+* Thu Jun 05 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.3-1
+- XRootD 5.8.3
 
 * Thu May 08 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.2-1
 - XRootD 5.8.2

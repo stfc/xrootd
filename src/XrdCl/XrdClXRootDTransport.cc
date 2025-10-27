@@ -123,12 +123,13 @@ namespace XrdCl
     //--------------------------------------------------------------------------
     // Constructor
     //--------------------------------------------------------------------------
-    XRootDStreamInfo(): status( Disconnected ), pathId( 0 )
+    XRootDStreamInfo(): status( Disconnected ), pathId( 0 ), serverFlags( 0 )
     {
     }
 
     StreamStatus status;
     uint8_t      pathId;
+    uint32_t     serverFlags;
   };
 
   //----------------------------------------------------------------------------
@@ -334,7 +335,7 @@ namespace XrdCl
       uint32_t bodySize = *(uint32_t*)(message.GetBuffer(4));
       Log *log = DefaultEnv::GetLog();
       log->Dump( XRootDTransportMsg, "[msg: %p] Expecting %d bytes of message "
-                 "body", &message, bodySize );
+                 "body", (void*)&message, bodySize );
 
       return XRootDStatus( stOK, suDone );
     }
@@ -418,7 +419,7 @@ namespace XrdCl
     XRootDStatus st = XRootDTransport::UnMarchalStatusMore( message );
     if( !st.IsOK() && st.code == errDataError )
     {
-      log->Error( XRootDTransportMsg, "[msg: %p] %s", &message,
+      log->Error( XRootDTransportMsg, "[msg: %p] %s", (void*)&message,
                   st.GetErrorMessage().c_str() );
       return st;
     }
@@ -426,7 +427,7 @@ namespace XrdCl
     if( !st.IsOK() )
     {
       log->Error( XRootDTransportMsg, "[msg: %p] Failed to unmarshall status body.",
-                  &message );
+                  (void*)&message );
       return st;
     }
 
@@ -1655,7 +1656,7 @@ namespace XrdCl
     {
       log->Error( XRootDTransportMsg, "Message %p, stream [%d, %d] is a "
                   "response that we're no longer interested in (timed out)",
-                  &msg, rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
+                  (void*)&msg, rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
       //------------------------------------------------------------------------
       // If it is kXR_waitresp there will be another one,
       // so we don't release the sid yet
@@ -2028,17 +2029,35 @@ namespace XrdCl
       return XRootDStatus( stFatal, errHandShakeFailed, 0, "Invalid hand shake response." );
     }
 
-    info->protocolVersion = ntohl(hs->protover);
-    info->serverFlags     = ntohl(hs->msgval) == kXR_DataServer ?
-                            kXR_isServer:
-                            kXR_isManager;
+    const uint32_t pv = ntohl(hs->protover);
+    const uint32_t sf = ntohl(hs->msgval) == kXR_DataServer ?
+                        kXR_isServer:
+                        kXR_isManager;
 
-    log->Debug( XRootDTransportMsg,
-                "[%s] Got the server hand shake response (%s, protocol "
-                "version %x)",
-                hsData->streamName.c_str(),
-                ServerFlagsToStr( info->serverFlags ).c_str(),
-                info->protocolVersion );
+    if ( hsData->subStreamId == 0 )
+    {
+      info->protocolVersion = pv;
+      info->serverFlags     = sf;
+
+      log->Debug( XRootDTransportMsg,
+                  "[%s] Got the server hand shake response (%s, protocol "
+                  "version %x)",
+                  hsData->streamName.c_str(),
+                  ServerFlagsToStr( info->serverFlags ).c_str(),
+                  info->protocolVersion );
+    }
+    else
+    {
+      XRootDStreamInfo &sInfo = info->stream[hsData->subStreamId];
+      sInfo.serverFlags       = sf;
+
+      log->Debug( XRootDTransportMsg,
+                  "[%s] Got the server hand shake response on substream %d "
+                  "(%s, protocol version %x)",
+                  hsData->streamName.c_str(), hsData->subStreamId,
+                  ServerFlagsToStr( sInfo.serverFlags ).c_str(),
+                  pv );
+    }
 
     return XRootDStatus( stOK, suContinue );
   }
@@ -2064,6 +2083,14 @@ namespace XrdCl
                                       hsData->streamName.c_str() );
 
       return XRootDStatus( stFatal, errHandShakeFailed, 0, "kXR_protocol request failed" );
+    }
+
+    if ( hsData->subStreamId > 0 )
+    {
+      XRootDStreamInfo &sInfo = info->stream[hsData->subStreamId];
+      if( rsp->body.protocol.pval >= 0x297 )
+        sInfo.serverFlags = rsp->body.protocol.flags;
+      return XRootDStatus( stOK, suContinue );
     }
 
     XrdCl::Env *env = XrdCl::DefaultEnv::GetEnv();
