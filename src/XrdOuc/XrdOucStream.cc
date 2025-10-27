@@ -421,6 +421,9 @@ int XrdOucStream::Exec(const char *theCmd, int inrd, int efd)
     int j;
     char *cmd, *origcmd, *parm[MaxARGC];
 
+    if (!theCmd)
+      return EINVAL;
+
     // Allocate a buffer for the command as we will be modifying it
     //
     origcmd = cmd = (char *)malloc(strlen(theCmd)+1);
@@ -439,9 +442,9 @@ int XrdOucStream::Exec(const char *theCmd, int inrd, int efd)
 
     // Continue with normal processing
     //
-    j = Exec(parm, inrd, efd);
+    int ret = j > 0 ? Exec(parm, inrd, efd) : EINVAL;
     free(origcmd);
-    return j;
+    return ret;
 }
 
 int XrdOucStream::Exec(char **parm, int inrd, int efd)
@@ -574,8 +577,7 @@ char *XrdOucStream::GetLine()
   
    // There is no next record, so move up data in the buffer.
    //
-      strncpy(buff, bnext, bleft);
-      bnext = buff + bleft;
+      bnext = stpncpy(buff, bnext, bleft);
       }
       else bnext = buff;
 
@@ -1353,9 +1355,9 @@ int XrdOucStream::isSet(char *var)
    static const char *Mtxt1[2] = {"setenv", "set"};
    static const char *Mtxt2[2] = {"Setenv variable", "Set variable"};
    static const char *Mtxt3[2] = {"Variable", "Environmental variable"};
-   char *tp, *vn, *vp, *pv, Vname[64], ec, Nil = 0, sawIT = 0;
+   char *tp, *vn, *vp, *pv, Vname[64] = "", ec, Nil = 0, sawIT = 0;
    int Set = 1;
-   char valBuff[1024];
+   char valBuff[1024] = "";
 
 // Process set var = value | set -v | setenv = value
 //

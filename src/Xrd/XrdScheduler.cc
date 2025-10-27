@@ -533,6 +533,11 @@ void XrdScheduler::setNproc(const bool limlower)
                max_Workers = static_cast<int>(theMax);
           else max_Workers = static_cast<int>(rlim.rlim_cur);
       }
+
+// The above may allow way too many threads. We make sure that the default
+// maximum threads is adhered to.
+//
+   if (max_Workers > DFL_SCHED_PROCS) max_Workers = DFL_SCHED_PROCS;
 #endif
 }
 
@@ -624,7 +629,7 @@ int XrdScheduler::Stats(char *buff, int blen, int do_sync)
 {
     int cnt_Jobs, cnt_JobsinQ, xam_QLength, cnt_Workers, cnt_idl;
     int cnt_TCreate, cnt_TDestroy, cnt_Limited;
-    static char statfmt[] = "<stats id=\"sched\"><jobs>%d</jobs>"
+    static const char statfmt[] = "<stats id=\"sched\"><jobs>%d</jobs>"
                 "<inq>%d</inq><maxinq>%d</maxinq>"
                 "<threads>%d</threads><idle>%d</idle>"
                 "<tcr>%d</tcr><tde>%d</tde>"
@@ -722,7 +727,7 @@ void XrdScheduler::hireWorker(int dotrace)
       {XrdLog->Emsg("Scheduler", retc, "create worker thread");
        SchedMutex.Lock();
        num_Workers--;
-       num_TCreate--;
+       num_TDestroy++;
        max_Workers = num_Workers;
        min_Workers = (max_Workers/10 ? max_Workers/10 : 1);
        stk_Workers = max_Workers/4*3;

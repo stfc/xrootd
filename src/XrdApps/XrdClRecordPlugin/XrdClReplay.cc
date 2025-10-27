@@ -217,7 +217,7 @@ bool AssureFile(const std::string& url, uint64_t size, bool viatruncate, bool ve
 {
   OpenFlags::Flags flags   = OpenFlags::Read;
   Access::Mode     mode    = Access::None;
-  uint16_t         timeout = 60;
+  time_t           timeout = 60;
 
   {
     // deal with existing files
@@ -353,7 +353,7 @@ class ActionExecutor
       std::string      url;
       OpenFlags::Flags flags;
       Access::Mode     mode;
-      uint16_t         timeout;
+      time_t           timeout;
       std::tie(url, flags, mode, timeout) = GetOpenArgs();
 
       std::string lmetric;
@@ -372,7 +372,7 @@ class ActionExecutor
 
       if (!simulate)
         WaitFor(Open(file, url, flags, mode, timeout) >>
-                [this, orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
+                [orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
                 {
                   metric.addIos("Open", "e", HandleStatus(s, orgststr, "Open"));
                   metric.addDelays("Open", "tmeas", timer.elapsed());
@@ -387,7 +387,7 @@ class ActionExecutor
     }
     else if (action == "Close")  // close action
     {
-      uint16_t    timeout = GetCloseArgs();
+      time_t      timeout = GetCloseArgs();
       mytimer_t   timer;
 
       if (closing)
@@ -401,7 +401,7 @@ class ActionExecutor
 
       if (!simulate)
         Async(Close(file, timeout) >>
-              [this, orgststr{ orgststr }, ending, timer, &metric](XRootDStatus& s) mutable
+              [orgststr{ orgststr }, ending, timer, &metric](XRootDStatus& s) mutable
               {
                 metric.addIos("Close", "e", HandleStatus(s, orgststr, "Close"));
                 metric.addDelays("Close", "tmeas", timer.elapsed());
@@ -415,14 +415,14 @@ class ActionExecutor
     else if (action == "Stat")  // stat action
     {
       bool     force;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(force, timeout) = GetStatArgs();
       metric.ios["Stat::n"]++;
       mytimer_t timer;
 
       if (!simulate)
         Async(Stat(file, force, timeout) >>
-              [this, orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s, StatInfo& r) mutable
+              [orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s, StatInfo& r) mutable
               {
                 metric.addIos("Stat", "e", HandleStatus(s, orgststr, "Stat"));
                 metric.addDelays("Stat", "tmeas", timer.elapsed());
@@ -439,7 +439,7 @@ class ActionExecutor
     {
       uint64_t offset;
       buffer_t buffer;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(offset, buffer, timeout) = GetReadArgs();
       metric.ios["Read::n"]++;
       metric.ios["Read::b"] += buffer->size();
@@ -469,7 +469,7 @@ class ActionExecutor
     {
       uint64_t offset;
       buffer_t buffer;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(offset, buffer, timeout) = GetPgReadArgs();
       metric.ios["PgRead::n"]++;
       metric.ios["PgRead::b"] += buffer->size();
@@ -498,7 +498,7 @@ class ActionExecutor
     {
       uint64_t offset;
       buffer_t buffer;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(offset, buffer, timeout) = GetWriteArgs();
       metric.ios["Write::n"]++;
       metric.ios["Write::b"] += buffer->size();
@@ -528,7 +528,7 @@ class ActionExecutor
     {
       uint64_t offset;
       buffer_t buffer;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(offset, buffer, timeout) = GetPgWriteArgs();
       metric.ios["PgWrite::n"]++;
       metric.ios["PgWrite::b"] += buffer->size();
@@ -555,12 +555,12 @@ class ActionExecutor
     }
     else if (action == "Sync")  // sync action
     {
-      uint16_t    timeout = GetSyncArgs();
+      time_t timeout = GetSyncArgs();
       metric.ios["Sync::n"]++;
       mytimer_t timer;
       if (!simulate)
         Async(Sync(file, timeout) >>
-              [this, orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
+              [orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
               {
                 metric.addIos("Sync", "e", HandleStatus(s, orgststr, "Sync"));
                 metric.addDelays("Sync", "tmeas", timer.elapsed());
@@ -576,7 +576,7 @@ class ActionExecutor
     else if (action == "Truncate")  // truncate action
     {
       uint64_t size;
-      uint16_t timeout;
+      time_t   timeout;
       std::tie(size, timeout) = GetTruncateArgs();
       metric.ios["Truncate::n"]++;
       if (size > metric.ios["Truncate::o"])
@@ -585,7 +585,7 @@ class ActionExecutor
       mytimer_t timer;
       if (!simulate)
         Async(Truncate(file, size, timeout) >>
-              [this, orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
+              [orgststr{ orgststr }, ending, closing, timer, &metric](XRootDStatus& s) mutable
               {
                 metric.addIos("Truncate", "e", HandleStatus(s, orgststr, "Truncate"));
                 metric.addDelays("Truncate", "tmeas", timer.elapsed());
@@ -601,7 +601,7 @@ class ActionExecutor
     else if (action == "VectorRead")  // vector read action
     {
       ChunkList chunks;
-      uint16_t  timeout;
+      time_t    timeout;
       std::vector<buffer_t> buffers;
       std::tie(chunks, timeout, buffers) = GetVectorReadArgs();
       metric.ios["VectorRead::n"]++;
@@ -616,7 +616,7 @@ class ActionExecutor
       if (!simulate)
         Async(
           VectorRead(file, chunks, timeout) >>
-          [this, orgststr{ orgststr }, buffers, ending, closing, timer, &metric](XRootDStatus& s, VectorReadInfo& r) mutable
+          [orgststr{ orgststr }, buffers, ending, closing, timer, &metric](XRootDStatus& s, VectorReadInfo& r) mutable
           {
             metric.addIos("VectorRead", "e", HandleStatus(s, orgststr, "VectorRead"));
             metric.addDelays("VectorRead", "tmeas", timer.elapsed());
@@ -634,7 +634,7 @@ class ActionExecutor
     else if (action == "VectorWrite")  // vector write
     {
       ChunkList chunks;
-      uint16_t  timeout;
+      time_t    timeout;
       std::vector<buffer_t> buffers;
       std::tie(chunks, timeout, buffers) = GetVectorWriteArgs();
       metric.ios["VectorWrite::n"]++;
@@ -647,7 +647,7 @@ class ActionExecutor
       mytimer_t timer;
       if (!simulate)
         Async(VectorWrite(file, chunks, timeout) >>
-              [this, orgststr{ orgststr }, buffers, ending, closing, timer, &metric](XRootDStatus& s) mutable
+              [orgststr{ orgststr }, buffers, ending, closing, timer, &metric](XRootDStatus& s) mutable
               {
                 metric.addIos("VectorWrite", "e", HandleStatus(s, orgststr, "VectorWrite"));
                 metric.addDelays("VectorWrite", "tmeas", timer.elapsed());
@@ -715,7 +715,7 @@ class ActionExecutor
     std::string      url     = tokens[0];
     OpenFlags::Flags flags   = static_cast<OpenFlags::Flags>(std::stoul(tokens[1]));
     Access::Mode     mode    = static_cast<Access::Mode>(std::stoul(tokens[2]));
-    uint16_t         timeout = static_cast<uint16_t>(std::stoul(tokens[3]));
+    time_t           timeout = static_cast<time_t>(std::stoul(tokens[3]));
     return std::make_tuple(url, flags, mode, timeout);
   }
 
@@ -731,7 +731,7 @@ class ActionExecutor
     if (tokens.size() != 2)
       throw std::invalid_argument("Failed to parse stat arguments.");
     bool     force   = (tokens[0] == "true");
-    uint16_t timeout = static_cast<uint16_t>(std::stoul(tokens[1]));
+    time_t   timeout = static_cast<time_t>(std::stoul(tokens[1]));
     return std::make_tuple(force, timeout);
   }
 
@@ -747,7 +747,7 @@ class ActionExecutor
     uint64_t offset  = std::stoull(tokens[0]);
     uint32_t length  = std::stoul(tokens[1]);
     auto     buffer  = BufferPool::Instance().Allocate( length );
-    uint16_t timeout = static_cast<uint16_t>(std::stoul(tokens[2]));
+    time_t   timeout = static_cast<time_t>(std::stoul(tokens[2]));
     return std::make_tuple(offset, buffer, timeout);
   }
 
@@ -781,7 +781,7 @@ class ActionExecutor
     if (tokens.size() != 2)
       throw std::invalid_argument("Failed to parse truncate arguments.");
     uint64_t size    = std::stoull(tokens[0]);
-    uint16_t timeout = static_cast<uint16_t>(std::stoul(tokens[1]));
+    time_t   timeout = static_cast<time_t>(std::stoul(tokens[1]));
     return std::make_tuple(size, timeout);
   }
 
@@ -804,7 +804,7 @@ class ActionExecutor
       chunks.emplace_back(offset, length, buffer->data());
       buffers.emplace_back( std::move( buffer ) );
     }
-    uint16_t timeout = static_cast<uint16_t>(std::stoul(tokens.back()));
+    time_t   timeout = static_cast<time_t>(std::stoul(tokens.back()));
     return std::make_tuple(std::move(chunks), timeout, std::move(buffers));
   }
 

@@ -11,6 +11,7 @@
 #include "XrdXrootd/XrdXrootdTpcMon.hh"
 #include "XrdOuc/XrdOucTUtils.hh"
 #include "XrdHttpTpc/XrdHttpTpcUtils.hh"
+#include "XrdHttp/XrdHttpUtils.hh"
 
 #include <curl/curl.h>
 
@@ -22,7 +23,6 @@
 #include <sstream>
 #include <stdexcept>
 #include <thread>
-#include <iostream> // Delete later!!!
 
 #include "XrdHttpTpcState.hh"
 #include "XrdHttpTpcStream.hh"
@@ -323,11 +323,9 @@ std::string TPCHandler::GetAuthz(XrdHttpExtReq &req) {
     std::string authz;
     auto authz_header = XrdOucTUtils::caseInsensitiveFind(req.headers,"authorization");
     if (authz_header != req.headers.end()) {
-        char * quoted_url = quote(authz_header->second.c_str());
         std::stringstream ss;
-        ss << "authz=" << quoted_url;
-        free(quoted_url);
-        authz = ss.str();
+        ss << "authz=" << encode_str(authz_header->second);
+        authz += ss.str();
     }
     return authz;
 }
@@ -839,9 +837,7 @@ int TPCHandler::ProcessPushReq(const std::string & resource, XrdHttpExtReq &req)
         const char *msg = fh->error.getErrText(code);
         if (msg == NULL) ss << "Failed to open local resource";
         else ss << msg;
-        rec.status = 400;
-        if (code == EACCES) rec.status = 401;
-        else if (code == EEXIST) rec.status = 412;
+        rec.status = mapErrNoToHttp(code);
         logTransferEvent(LogMask::Error, rec, "OPEN_FAIL", msg);
         int resp_result = req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec).c_str(), 0);
         fh->close();
@@ -993,9 +989,7 @@ int TPCHandler::ProcessPullReq(const std::string &resource, XrdHttpExtReq &req) 
         const char *msg = fh->error.getErrText(code);
         if ((msg == NULL) || (*msg == '\0')) ss << "Failed to open local resource";
         else ss << msg;
-        rec.status = 400;
-        if (code == EACCES) rec.status = 401;
-        else if (code == EEXIST) rec.status = 412;
+        rec.status = mapErrNoToHttp(code);
         logTransferEvent(LogMask::Error, rec, "OPEN_FAIL", ss.str());
         int resp_result = req.SendSimpleResp(rec.status, NULL, NULL,
                                              generateClientErr(ss, rec).c_str(), 0);

@@ -4,6 +4,14 @@ macro( define_default variable value )
   endif()
 endmacro()
 
+# Set a default build type of RelWithDebInfo if not set
+if(NOT GENERATOR_IS_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+  if(NOT CMAKE_C_FLAGS AND NOT CMAKE_CXX_FLAGS)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+      "CMake build type for single-configuration generators" FORCE)
+  endif()
+endif()
+
 add_definitions( -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 )
 define_default( LIBRARY_PATH_PREFIX "lib" )
 
@@ -21,20 +29,25 @@ if( ENABLE_TSAN )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=thread")
 endif()
 
-#-------------------------------------------------------------------------------
-# GCC
-#-------------------------------------------------------------------------------
-if( CMAKE_COMPILER_IS_GNUCXX )
-  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" )
-  #-----------------------------------------------------------------------------
-  # Set -Werror only for Debug (or undefined) build type or if we have been
-  # explicitly asked to do so
-  #-----------------------------------------------------------------------------
-  if( ( CMAKE_BUILD_TYPE STREQUAL "Debug" OR "${CMAKE_BUILD_TYPE}" STREQUAL ""
-        OR FORCE_WERROR ) )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror" )
-  endif()
-  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter" )
+# Set baseline warning level for GCC and Clang
+
+add_compile_options(
+  -Wall
+  -Wextra
+  $<$<NOT:$<BOOL:${APPLE}>>:-Wdeprecated>
+  -Wnull-dereference
+  -Wno-unused-parameter
+  -Wno-vla
+)
+
+# Disable some warnings currently triggered with Clang
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(
+    -Wno-deprecated-copy-with-user-provided-dtor
+    -Wno-unused-const-variable
+    -Wno-unused-private-field
+  )
 endif()
 
 # Disable warnings with nvc++ (for when we are built as ROOT built-in dependency)

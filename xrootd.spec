@@ -16,11 +16,11 @@ License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AN
 URL:		https://xrootd.org
 
 %if !%{with git}
-Version:	5.8.1
+Version:	5.8.4
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
-%define src_version %(sed -e "s/%%(describe)/v5.7-rc%(date +%%Y%%m%%d)/" <<< "%git_version")
+%define src_version %(sed -e "s/%%(describe)/v5.8-rc%(date +%%Y%%m%%d)/" <<< "%git_version")
 %define rpm_version %(sed -e 's/v//; s/-rc/~rc/; s/-g/+git/; s/-/.post/; s/-/./' <<< "%src_version")
 Version:	%rpm_version
 Source0:	%{name}.tar.gz
@@ -57,6 +57,7 @@ BuildRequires:	libuuid-devel
 BuildRequires:	voms-devel
 BuildRequires:	scitokens-cpp-devel
 BuildRequires:	davix-devel
+BuildRequires:  libxcrypt-devel
 
 %if %{with asan}
 BuildRequires:	libasan
@@ -80,6 +81,7 @@ BuildRequires:	python3-sphinx
 %if %{with tests}
 BuildRequires:	attr
 BuildRequires:	coreutils
+BuildRequires:	curl
 BuildRequires:	davix
 BuildRequires:	gtest-devel
 BuildRequires:	openssl
@@ -115,7 +117,7 @@ Requires:	%{name}-client%{?_isa} = %{epoch}:%{version}-%{release}
 Requires:	%{name}-server-libs%{?_isa} = %{epoch}:%{version}-%{release}
 Requires:	expect
 Requires:	logrotate
-%{?sysusers_requires_compat}
+Requires(pre): shadow-utils
 %{?systemd_requires}
 
 %description server
@@ -389,9 +391,6 @@ install -m 644 packaging/common/frm_purged@.service %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}%{_tmpfilesdir}
 install -m 644 packaging/rhel/xrootd.tmpfiles %{buildroot}%{_tmpfilesdir}/%{name}.conf
 
-mkdir -p %{buildroot}%{_sysusersdir}
-install -m 644 packaging/rhel/%{name}-sysusers.conf %{buildroot}%{_sysusersdir}/%{name}.conf
-
 # Server config
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}
 install -m 644 -p packaging/common/%{name}-clustered.cfg \
@@ -453,7 +452,9 @@ install -m 644 -p packaging/common/%{name}.pp \
 %ldconfig_scriptlets server-libs
 
 %pre server
-%sysusers_create_compat %(tar -z -x -f %{SOURCE0} --no-anchored xrootd-sysusers.conf -O > /tmp/xrootd-sysusers.conf && echo /tmp/xrootd-sysusers.conf)
+getent group %{name} >/dev/null || groupadd -r %{name}
+getent passwd %{name} >/dev/null || useradd -r -g %{name} -s /sbin/nologin \
+	-d %{_localstatedir}/spool/%{name} -c "System user for XRootD" %{name}
 
 %post server
 %tmpfiles_create %{_tmpfilesdir}/%{name}.conf
@@ -521,7 +522,6 @@ fi
 %{_datadir}/%{name}/utils
 %{_unitdir}/*
 %{_tmpfilesdir}/%{name}.conf
-%{_sysusersdir}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
 %dir %{_sysconfdir}/%{name}/config.d
 %attr(-,xrootd,xrootd) %config(noreplace) %{_sysconfdir}/%{name}/*.cfg
@@ -614,6 +614,7 @@ fi
 %{_libdir}/libXrdFileCache-5.so
 %{_libdir}/libXrdHttp-5.so
 %{_libdir}/libXrdHttpTPC-5.so
+%{_libdir}/libXrdHttpCors-5.so
 %{_libdir}/libXrdMacaroons-5.so
 %{_libdir}/libXrdN2No2p-5.so
 %{_libdir}/libXrdOfsPrepGPI-5.so
@@ -702,6 +703,15 @@ fi
 %endif
 
 %changelog
+
+* Thu Jul 10 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.4-1
+- XRootD 5.8.4
+
+* Thu Jun 05 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.3-1
+- XRootD 5.8.3
+
+* Thu May 08 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.2-1
+- XRootD 5.8.2
 
 * Mon Apr 14 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.1-1
 - XRootD 5.8.1

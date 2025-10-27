@@ -515,17 +515,28 @@ void XrdPosixConfig::SetEnv(const char *kword, int kval)
 //
         if (!strcmp(kword, "DirlistAll"))
            {XrdPosixGlobals::dlFlag = (kval ? XrdCl::DirListFlags::Locate
-                                            : XrdCl::DirListFlags::None);
+                                            : XrdCl::DirListFlags::None) |
+                                      XrdCl::DirListFlags::Stat;
             dlfSet = true;
            }
    else if (!strcmp(kword, "DirlistDflt"))
            {if (!dlfSet)
             XrdPosixGlobals::dlFlag = (kval ? XrdCl::DirListFlags::Locate
-                                            : XrdCl::DirListFlags::None);
+                                            : XrdCl::DirListFlags::None) |
+                                      XrdCl::DirListFlags::Stat;
            }
    else env->PutInt((std::string)kword, kval);
 }
   
+/******************************************************************************/
+
+void XrdPosixConfig::SetEnv(const char *kword, void* ptr)
+{
+   XrdCl::Env *env = XrdCl::DefaultEnv::GetEnv();
+
+   env->PutPtr((std::string)kword, ptr);
+}
+
 /******************************************************************************/
 /* Private:                      S e t I P V 4                                */
 /******************************************************************************/
