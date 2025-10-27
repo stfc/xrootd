@@ -471,5 +471,8 @@ protected:
   /// The static string version of m_staticheader_map.  After config parsing is done, this is
   /// computed and we won't need to reference m_staticheader_map in the response path.
   static std::unordered_map<std::string, std::string> m_staticheaders;
+
+  /// Redirect helper from SciTokens
+  static XrdSciTokensRedir *m_redir;
 };
 #endif
