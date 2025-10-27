@@ -72,9 +72,9 @@ int XrdFfsPosix_stat(const char *path, struct stat *buf)
     {                                     /* So we re-mark it to a regular file */
         buf->st_mode &= 0007777;
         if ( buf->st_mode & S_IXUSR )
-            buf->st_mode |= 0040000;   /* a directory */
+            buf->st_mode |= S_IFDIR;   /* a directory */
         else
-            buf->st_mode |= 0100000;   /* a file */
+            buf->st_mode |= S_IFREG;   /* a file */
     }
     return rc;
 }
@@ -101,7 +101,7 @@ int XrdFfsPosix_mkdir(const char *path, mode_t mode)
     XrdCl::LocationInfo *info = nullptr;
     XrdCl::FileSystem fs(path);
 
-    XrdCl::XRootDStatus st = fs.DeepLocate("*", XrdCl::OpenFlags::None, info );
+    XrdCl::XRootDStatus st = fs.DeepLocate("*", XrdCl::OpenFlags::PrefName, info );
     std::unique_ptr<XrdCl::LocationInfo> ptr( info );  
 
     if( !st.IsOK() )

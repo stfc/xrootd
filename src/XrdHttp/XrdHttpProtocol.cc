@@ -26,6 +26,7 @@
 #include "Xrd/XrdBuffer.hh"
 #include "Xrd/XrdLink.hh"
 #include "XProtocol/XProtocol.hh"
+#include "XrdOuc/XrdOuca2x.hh"
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucGMap.hh"
@@ -44,7 +45,9 @@
 #include "XrdTls/XrdTlsContext.hh"
 #include "XrdOuc/XrdOucUtils.hh"
 #include "XrdOuc/XrdOucPrivateUtils.hh"
+#include "XrdHttpCors/XrdHttpCors.hh"
 
+#include <charconv>
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #include <vector>
@@ -84,6 +87,7 @@ char *XrdHttpProtocol::listredir = 0;
 bool XrdHttpProtocol::listdeny = false;
 bool XrdHttpProtocol::embeddedstatic = true;
 char *XrdHttpProtocol::staticredir = 0;
+int XrdHttpProtocol::m_maxdelay = -1;
 XrdOucHash<XrdHttpProtocol::StaticPreloadInfo> *XrdHttpProtocol::staticpreload = 0;
 
 kXR_int32 XrdHttpProtocol::myRole = kXR_isManager;
@@ -100,6 +104,8 @@ BIO *XrdHttpProtocol::sslbio_err = 0;
 XrdHttpSecXtractor *XrdHttpProtocol::secxtractor = 0;
 bool XrdHttpProtocol::isRequiredXtractor = false;
 struct XrdHttpProtocol::XrdHttpExtHandlerInfo XrdHttpProtocol::exthandler[MAX_XRDHTTPEXTHANDLERS];
+std::string XrdHttpProtocol::xrdcorsLibPath;
+XrdHttpCors * XrdHttpProtocol::xrdcors = nullptr;
 int XrdHttpProtocol::exthandlercnt = 0;
 std::map< std::string, std::string > XrdHttpProtocol::hdr2cgimap; 
 
@@ -139,6 +145,7 @@ static const int hsmOn   =  1; // Dual purpose but use a meaningful varname
 
 int  httpsmode = hsmAuto;
 int  tlsCache  = XrdTlsContext::scOff;
+bool tlsClientAuth = true;
 bool httpsspec = false;
 bool xrdctxVer = false;
 }
@@ -557,7 +564,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
       strcpy(SecEntity.prot, "https");
 
       // Get the voms string and auth information
-      if (HandleAuthentication(Link)) {
+      if (tlsClientAuth && HandleAuthentication(Link)) {
           SSL_free(ssl);
           ssl = 0;
           return -1;
@@ -792,7 +799,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         nfo = CurrentReq.opaque->Get("xrdhttpname");
         if (nfo) {
           TRACEI(DEBUG, " Setting name: " << nfo);
-          SecEntity.name = unquote(nfo);
+          SecEntity.name = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting name: " << SecEntity.name);
         }
         
@@ -800,42 +807,42 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
         if (nfo) {
           TRACEI(DEBUG, " Setting host: " << nfo);
           if (SecEntity.host) free(SecEntity.host);
-          SecEntity.host = unquote(nfo);
+          SecEntity.host = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting host: " << SecEntity.host);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpdn");
         if (nfo) {
           TRACEI(DEBUG, " Setting dn: " << nfo);
-          SecEntity.moninfo = unquote(nfo);
+          SecEntity.moninfo = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting dn: " << SecEntity.moninfo);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttprole");
         if (nfo) {
           TRACEI(DEBUG, " Setting role: " << nfo);
-          SecEntity.role = unquote(nfo);
+          SecEntity.role = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting role: " << SecEntity.role);
         }
 
         nfo = CurrentReq.opaque->Get("xrdhttpgrps");
         if (nfo) {
           TRACEI(DEBUG, " Setting grps: " << nfo);
-          SecEntity.grps = unquote(nfo);
+          SecEntity.grps = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting grps: " << SecEntity.grps);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpendorsements");
         if (nfo) {
           TRACEI(DEBUG, " Setting endorsements: " << nfo);
-          SecEntity.endorsements = unquote(nfo);
+          SecEntity.endorsements = strdup(decode_str(nfo).c_str());
           TRACEI(REQ, " Setting endorsements: " << SecEntity.endorsements);
         }
         
         nfo = CurrentReq.opaque->Get("xrdhttpcredslen");
         if (nfo) {
           TRACEI(DEBUG, " Setting credslen: " << nfo);
-          char *s1 = unquote(nfo);
+          char *s1 = strdup(decode_str(nfo).c_str());
           if (s1 && s1[0]) {
             SecEntity.credslen = atoi(s1);
             TRACEI(REQ, " Setting credslen: " << SecEntity.credslen);
@@ -847,7 +854,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
           nfo = CurrentReq.opaque->Get("xrdhttpcreds");
           if (nfo) {
             TRACEI(DEBUG, " Setting creds: " << nfo);
-            SecEntity.creds = unquote(nfo);
+            SecEntity.creds = strdup(decode_str(nfo).c_str());
             TRACEI(REQ, " Setting creds: " << SecEntity.creds);
           }
         }
@@ -898,6 +905,7 @@ int XrdHttpProtocol::Process(XrdLink *lp) // We ignore the argument here
       TRACEI(REQ, " Authorization failed.");
       return -1;
     }
+    if (m_maxdelay > 0) Bridge->SetWait(m_maxdelay, false);
 
     // Let the bridge process the login, and then reinvoke us
     DoingLogin = true;
@@ -1070,6 +1078,7 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
       else if TS_Xeq("secretkey", xsecretkey);
       else if TS_Xeq("desthttps", xdesthttps);
       else if TS_Xeq("secxtractor", xsecxtractor);
+      else if TS_Xeq("cors", xcors);
       else if TS_Xeq3("exthandler", xexthandler);
       else if TS_Xeq("selfhttps2http", xselfhttps2http);
       else if TS_Xeq("embeddedstatic", xembeddedstatic);
@@ -1082,6 +1091,8 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
       else if TS_Xeq("httpsmode", xhttpsmode);
       else if TS_Xeq("tlsreuse", xtlsreuse);
       else if TS_Xeq("auth", xauth);
+      else if TS_Xeq("tlsclientauth", xtlsclientauth);
+      else if TS_Xeq("maxdelay", xmaxdelay);
       else {
         eDest.Say("Config warning: ignoring unknown directive '", var, "'.");
         Config.Echo();
@@ -1134,6 +1145,16 @@ int XrdHttpProtocol::Config(const char *ConfigFN, XrdOucEnv *myEnv) {
 // Test if this is a caching server
 //
    if (myEnv->Get("XrdCache")) hasCache = true;
+
+   // Load CORS plugin if configured
+   if(xrdcorsLibPath.size()) {
+     if(LoadCorsHandler(&eDest, xrdcorsLibPath.c_str()) != 0) {
+       return 1;
+     }
+     if (xrdcors->Configure(ConfigFN, &eDest) != 0) {
+       return 1;
+     }
+   }
 
 // If https was disabled, then issue a warning message if xrdtls configured
 // of it's disabled because httpsmode was auto and xrdtls was not configured.
@@ -1589,31 +1610,47 @@ int XrdHttpProtocol::SendData(const char *body, int bodylen) {
 /******************************************************************************/
 /*                       S t a r t S i m p l e R e s p                        */
 /******************************************************************************/
-  
-int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *header_to_add, long long bodylen, bool keepalive) {
+
+int XrdHttpProtocol::StartSimpleResp(int code, const char *desc,
+                                     const char *header_to_add,
+                                     long long bodylen, bool keepalive) {
+  static const std::unordered_map<int, std::string> statusTexts = {
+      {100, "Continue"},
+      {200, "OK"},
+      {201, "Created"},
+      {206, "Partial Content"},
+      {302, "Redirect"},
+      {307, "Temporary Redirect"},
+      {400, "Bad Request"},
+      {401, "Unauthorized"},
+      {403, "Forbidden"},
+      {404, "Not Found"},
+      {405, "Method Not Allowed"},
+      {409, "Conflict"},
+      {416, "Range Not Satisfiable"},
+      {423, "Locked"},
+      {500, "Internal Server Error"},
+      {502, "Bad Gateway"},
+      {504, "Gateway Timeout"},
+      {507, "Insufficient Storage"}};
+
   std::stringstream ss;
   const std::string crlf = "\r\n";
 
   ss << "HTTP/1.1 " << code << " ";
+
   if (desc) {
     ss << desc;
   } else {
-    if (code == 200) ss << "OK";
-    else if (code == 100) ss << "Continue";
-    else if (code == 206) ss << "Partial Content";
-    else if (code == 302) ss << "Redirect";
-    else if (code == 307) ss << "Temporary Redirect";
-    else if (code == 400) ss << "Bad Request";
-    else if (code == 403) ss << "Forbidden";
-    else if (code == 404) ss << "Not Found";
-    else if (code == 405) ss << "Method Not Allowed";
-    else if (code == 416) ss << "Range Not Satisfiable";
-    else if (code == 500) ss << "Internal Server Error";
-    else if (code == 502) ss << "Bad Gateway";
-    else if (code == 504) ss << "Gateway Timeout";
-    else ss << "Unknown";
+    auto it = statusTexts.find(code);
+    if (it != statusTexts.end()) {
+      ss << it->second;
+    } else {
+      ss << "Unknown";
+    }
   }
   ss << crlf;
+
   if (keepalive && (code != 100))
     ss << "Connection: Keep-Alive" << crlf;
   else
@@ -1627,19 +1664,25 @@ int XrdHttpProtocol::StartSimpleResp(int code, const char *desc, const char *hea
   } else {
     ss << m_staticheaders[""];
   }
-  
+
+  if(xrdcors) {
+    auto corsAllowOrigin = xrdcors->getCORSAllowOriginHeader(CurrentReq.m_origin);
+    if(corsAllowOrigin) {
+      ss << *corsAllowOrigin << crlf;
+    }
+  }
+
   if ((bodylen >= 0) && (code != 100))
     ss << "Content-Length: " << bodylen << crlf;
 
-  if (header_to_add && (header_to_add[0] != '\0'))
-    ss << header_to_add << crlf;
+  if (header_to_add && (header_to_add[0] != '\0')) ss << header_to_add << crlf;
 
   ss << crlf;
 
   const std::string &outhdr = ss.str();
   TRACEI(RSP, "Sending resp: " << code << " header len:" << outhdr.size());
   if (SendData(outhdr.c_str(), outhdr.size()))
-    return -1;
+   return -1;
 
   return 0;
 }
@@ -1896,6 +1939,9 @@ bool XrdHttpProtocol::InitTLS() {
        return false;
       }
 
+// Enable or disable the config in the context
+   xrdctx->SetTlsClientAuth(tlsClientAuth);
+
 // All done
 //
    return true;
@@ -1917,23 +1963,26 @@ void XrdHttpProtocol::Cleanup() {
 
   if (ssl) {
     // Shutdown the SSL/TLS connection
-    // https://www.openssl.org/docs/man1.0.2/man3/SSL_shutdown.html
-    // We don't need a bidirectional shutdown as
-    // when we are here, the connection will not be re-used.
-    // In the case SSL_shutdown returns 0,
-    // "the output of SSL_get_error(3) may be misleading, as an erroneous SSL_ERROR_SYSCALL may be flagged even though no error occurred."
-    // we will then just flush the thread's queue.
-    // In the case an error really happened, we print the error that happened
+    // This triggers a bidirectional shutdown of the connection; the bidirectional
+    // shutdown is useful to ensure that the client receives the server response;
+    // a one-sided shutdown can result in the server sending a TCP reset packet, zapping
+    // the contents of the TCP socket buffer on the client side.  The HTTP 1.1 RFC has a
+    // description of why this is important:
+    //   https://datatracker.ietf.org/doc/html/rfc9112#name-tls-connection-closure
+    // Once we get the clean SSL shutdown message back from the client, we know that
+    // the client has received the response and we can safely close the connection.
     int ret = SSL_shutdown(ssl);
     if (ret != 1) {
         if(ret == 0) {
-            // Clean this thread's error queue for the old openssl versions
-            #if OPENSSL_VERSION_NUMBER < 0x10100000L
-                ERR_remove_thread_state(nullptr);
-            #endif
+            // ret == 0, the unidirectional shutdown was successful; wait for the acknowledgement.
+            ret = SSL_shutdown(ssl);
+            if (ret != 1) {
+                TRACE(ALL, "SSL server failed to receive the SSL shutdown message from the client");
+                ERR_print_errors(sslbio_err);
+            }
         } else {
             //ret < 0, an error really happened.
-            TRACE(ALL, " SSL_shutdown failed");
+            TRACE(ALL, "SSL server failed to send the shutdown message to the client");
             ERR_print_errors(sslbio_err);
         }
     }
@@ -2630,8 +2679,9 @@ int XrdHttpProtocol::xstaticheader(XrdOucStream & Config) {
 
   for (const auto &verb : verbs) {
     auto iter = m_staticheader_map.find(verb);
-    if (iter == m_staticheader_map.end() && !header_value.empty()) {
-      m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
+    if (iter == m_staticheader_map.end()) {
+      if (!header_value.empty())
+        m_staticheader_map.insert(iter, {verb, {{header, header_value}}});
     } else if (header_value.empty()) {
       iter->second.clear();
     } else {
@@ -2731,6 +2781,18 @@ int XrdHttpProtocol::xsecxtractor(XrdOucStream& Config) {
     }
   }
 
+  return 0;
+}
+
+int XrdHttpProtocol::xcors(XrdOucStream& Config) {
+  char * val;
+  // Get the path
+  val = Config.GetWord();
+  if (!val || !val[0]) {
+    eDest.Emsg("Config", "No CORS plugin specified.");
+    return 1;
+  }
+  xrdcorsLibPath = val;
   return 0;
 }
 
@@ -2949,6 +3011,24 @@ int XrdHttpProtocol::xtlsreuse(XrdOucStream & Config) {
    return 1;
 }
 
+int XrdHttpProtocol::xtlsclientauth(XrdOucStream &Config) {
+  auto val = Config.GetWord();
+  if (!val || !val[0])
+     {eDest.Emsg("Config", "tlsclientauth argument not specified"); return 1;}
+
+  if (!strcmp(val, "off"))
+     {tlsClientAuth = false;
+      return 0;
+     }
+  if (!strcmp(val, "on"))
+     {tlsClientAuth = true;
+      return 0;
+     }
+
+  eDest.Emsg("config", "invalid tlsclientauth parameter -", val);
+  return 1;
+}
+
 int XrdHttpProtocol::xauth(XrdOucStream &Config) {
   char *val = Config.GetWord();
   if(val) {
@@ -2965,6 +3045,19 @@ int XrdHttpProtocol::xauth(XrdOucStream &Config) {
     } else {
       eDest.Emsg("Config", "http.auth value is invalid"); return 1;
     }
+  }
+  return 0;
+}
+
+int XrdHttpProtocol::xmaxdelay(XrdOucStream &Config) {
+  char *val = Config.GetWord();
+  if(val) {
+    int maxdelay;
+    if (XrdOuca2x::a2tm(eDest, "http.maxdelay", val, &maxdelay, 1)) return 1;
+    m_maxdelay = maxdelay;
+  } else {
+    eDest.Emsg("Config", "http.maxdelay requires an argument in seconds (default is 30).  Example: http.maxdelay 30");
+    return 1;
   }
   return 0;
 }
@@ -3170,6 +3263,15 @@ int XrdHttpProtocol::LoadExtHandler(XrdSysError *myeDest, const char *libName,
 }
 
 
+int XrdHttpProtocol::LoadCorsHandler(XrdSysError *eDest, const char *libname) {
+  if(xrdcors) return 1;
+  XrdOucPinLoader corsLib(eDest, &compiledVer, "corslib",libname);
+  XrdHttpCors *(*ep)(XrdHttpCorsGetHandlerArgs);
+  ep = (XrdHttpCors *(*)(XrdHttpCorsGetHandlerArgs))(corsLib.Resolve("XrdHttpCorsGetHandler"));
+  if(ep && (xrdcors = ep())) return 0;
+  corsLib.Unload();
+  return 1;
+}
 
 // Tells if we have already loaded a certain exthandler. Try to
 // privilege speed, as this func may be invoked pretty often

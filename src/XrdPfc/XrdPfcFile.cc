@@ -29,6 +29,8 @@
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdSfs/XrdSfsInterface.hh"
 
+#include "XrdCl/XrdClURL.hh"
+
 #include <cstdio>
 #include <sstream>
 #include <fcntl.h>
@@ -54,7 +56,7 @@ File::File(const std::string& path, long long iOffset, long long iFileSize) :
    m_ref_cnt(0),
    m_data_file(0),
    m_info_file(0),
-   m_cfi(Cache::GetInstance().GetTrace(), Cache::GetInstance().RefConfiguration().m_prefetch_max_blocks > 0),
+   m_cfi(Cache::TheOne().GetTrace(), Cache::TheOne().is_prefetch_enabled()),
    m_filename(path),
    m_offset(iOffset),
    m_file_size(iFileSize),
@@ -135,10 +137,10 @@ void File::Close()
 
 //------------------------------------------------------------------------------
 
-File* File::FileOpen(const std::string &path, long long offset, long long fileSize)
+File* File::FileOpen(const std::string &path, long long offset, long long fileSize, XrdOucCacheIO* inputIO)
 {
    File *file = new File(path, offset, fileSize);
-   if ( ! file->Open())
+   if ( ! file->Open(inputIO))
    {
       delete file;
       file = 0;
@@ -420,7 +422,7 @@ void File::RemoveIO(IO *io)
 
 //------------------------------------------------------------------------------
 
-bool File::Open()
+bool File::Open(XrdOucCacheIO* inputIO)
 {
    // Sets errno accordingly.
 
@@ -493,7 +495,8 @@ bool File::Open()
    {
       TRACEF(Debug, tpfx << "Reading existing info file. (data_existed=" << data_existed  <<
              ", data_size_stat=" << (data_existed ? data_stat.st_size : -1ll) <<
-             ", data_size_from_last_block=" << m_cfi.GetExpectedDataFileSize() << ")");
+             ", data_size_from_last_block=" << m_cfi.GetExpectedDataFileSize() <<
+             ", block_size=" << (m_cfi.GetBufferSize() >> 10) << "k)");
 
       // Check if data file exists and is of reasonable size.
       if (data_existed && data_stat.st_size >= m_cfi.GetExpectedDataFileSize())
@@ -523,20 +526,32 @@ bool File::Open()
       }
    }
 
+   // Check if we have pfc url arguments.
+   long long pfc_blocksize = conf.m_bufferSize;
+   int       pfc_prefetch  = conf.m_prefetch_max_blocks;
+   if (conf.m_cgi_blocksize_allowed || conf.m_cgi_prefetch_allowed)
+   {
+      parse_pfc_url_args(inputIO, pfc_blocksize, pfc_prefetch);
+   }
+
    if (initialize_info_file)
    {
-      m_cfi.SetBufferSizeFileSizeAndCreationTime(conf.m_bufferSize, m_file_size);
+      m_cfi.SetBufferSizeFileSizeAndCreationTime(pfc_blocksize, m_file_size);
       m_cfi.SetCkSumState(conf.get_cs_Chk());
       m_cfi.ResetNoCkSumTime();
       m_cfi.Write(m_info_file, ifn.c_str());
       m_info_file->Fsync();
       cache()->WriteFileSizeXAttr(m_info_file->getFD(), m_file_size);
-      TRACEF(Debug, tpfx << "Creating new file info, data size = " <<  m_file_size << " num blocks = "  << m_cfi.GetNBlocks());
+      TRACEF(Debug, tpfx << "Creating new file info, data size = " <<  m_file_size << " num blocks = "  << m_cfi.GetNBlocks()
+                         << " block size = " << pfc_blocksize);
    }
    else
    {
       if (futimens(m_info_file->getFD(), NULL)) {
          TRACEF(Error, tpfx << "failed setting modification time " << ERRNO_AND_ERRSTR(errno));
+      }
+      if (pfc_blocksize != conf.m_bufferSize) {
+         TRACEF(Info, tpfx << "URL CGI pfc.blocksize ignored for an already existing file");
       }
    }
 
@@ -545,6 +560,9 @@ bool File::Open()
    m_block_size = m_cfi.GetBufferSize();
    m_num_blocks = m_cfi.GetNBlocks();
    m_prefetch_state = (m_cfi.IsComplete()) ? kComplete : kStopped; // Will engage in AddIO().
+   m_prefetch_max_blocks_in_flight = pfc_prefetch;
+   if (pfc_prefetch != conf.m_prefetch_max_blocks)
+      TRACEF(Debug, tpfx << "pfc.prefetch set to " << pfc_prefetch << " via CGI parameter");
 
    m_data_file->Fstat(&data_stat);
    m_st_blocks = data_stat.st_blocks;
@@ -559,6 +577,53 @@ bool File::Open()
 
    return true;
 }
+
+void File::parse_pfc_url_args(XrdOucCacheIO* inputIO, long long &pfc_blocksize, int &pfc_prefetch) const
+{
+   const Configuration &conf = Cache::TheOne().RefConfiguration();
+
+   XrdCl::URL url(inputIO->Path());
+   auto const & urlp = url.GetParams();
+
+   auto extract = [&](const std::string &key, std::string &value) -> bool {
+      auto it = urlp.find(key);
+      if (it != urlp.end()) {
+         value = it->second;
+         return true;
+      } else {
+         value.clear();
+         return false;
+      }
+   };
+
+   std::string val;
+   if (conf.m_cgi_blocksize_allowed && extract("pfc.blocksize", val))
+   {
+      const char *tpfx = "File::Open::urlcgi pfc.blocksize ";
+      long long bsize;
+      if (Cache::TheOne().blocksize_str2value(tpfx, val.c_str(), bsize,
+                                              conf.m_cgi_min_bufferSize, conf.m_cgi_max_bufferSize))
+      {
+         pfc_blocksize = bsize;
+      } else {
+         TRACEF(Error, tpfx << "Error processing the parameter.");
+      }
+   }
+   if (conf.m_cgi_prefetch_allowed && extract("pfc.prefetch", val))
+   {
+      const char *tpfx = "File::Open::urlcgi pfc.prefetch ";
+      int pref;
+      if (Cache::TheOne().prefetch_str2value(tpfx, val.c_str(), pref,
+                                             conf.m_cgi_min_prefetch_max_blocks, conf.m_cgi_max_prefetch_max_blocks))
+      {
+         pfc_prefetch = pref;
+      } else {
+         TRACEF(Error, tpfx << "Error processing the parameter.");
+      }
+   }
+}
+
+//------------------------------------------------------------------------------
 
 int File::Fstat(struct stat &sbuff)
 {
@@ -652,7 +717,7 @@ Block* File::PrepareBlockRequest(int i, IO *io, void *req_id, bool prefetch)
 
          // Actual Read request is issued in ProcessBlockRequests().
 
-         if (m_prefetch_state == kOn && (int) m_block_map.size() >= Cache::GetInstance().RefConfiguration().m_prefetch_max_blocks)
+         if (m_prefetch_state == kOn && (int) m_block_map.size() >= m_prefetch_max_blocks_in_flight)
          {
             m_prefetch_state = kHold;
             cache()->DeRegisterPrefetchFile(this);
@@ -676,7 +741,7 @@ void File::ProcessBlockRequest(Block *b)
    if (XRD_TRACE What >= TRACE_Dump) {
       char buf[256];
       snprintf(buf, 256, "idx=%lld, block=%p, prefetch=%d, off=%lld, req_size=%d, buff=%p, resp_handler=%p ",
-         b->get_offset()/m_block_size, b, b->m_prefetch, b->get_offset(), b->get_req_size(), b->get_buff(), brh);
+         b->get_offset()/m_block_size, (void*)b, b->m_prefetch, b->get_offset(), b->get_req_size(), (void*)b->get_buff(), (void*)brh);
       TRACEF(Dump, "ProcessBlockRequest() " << buf);
    }
 
@@ -1115,8 +1180,6 @@ void File::WriteBlockToDisk(Block* b)
          m_cfi.ResetCkSumNet();
       }
 
-      dec_ref_count(b);
-
       // Set synced bit or stash block index if in actual sync.
       // Synced state is only written out to cinfo file when data file is synced.
       if (m_in_sync)
@@ -1135,11 +1198,19 @@ void File::WriteBlockToDisk(Block* b)
             m_non_flushed_cnt = 0;
          }
       }
+      // As soon as the reference count is decreased on the block, the
+      // file object may be deleted.  Thus, to avoid holding both locks at a time,
+      // we defer the ref count decrease until later if a sync is needed
+      if (!schedule_sync) {
+         dec_ref_count(b);
+      }
    }
 
    if (schedule_sync)
    {
       cache()->ScheduleFileSync(this);
+      XrdSysCondVarHelper _lck(m_state_cond);
+      dec_ref_count(b);
    }
 }
 
@@ -1235,7 +1306,7 @@ void File::free_block(Block* b)
       delete b;
    }
 
-   if (m_prefetch_state == kHold && (int) m_block_map.size() < Cache::GetInstance().RefConfiguration().m_prefetch_max_blocks)
+   if (m_prefetch_state == kHold && (int) m_block_map.size() < m_prefetch_max_blocks_in_flight)
    {
       m_prefetch_state = kOn;
       cache()->RegisterPrefetchFile(this);
@@ -1624,14 +1695,14 @@ float File::GetPrefetchScore() const
    return m_prefetch_score;
 }
 
-XrdSysError* File::GetLog()
+XrdSysError* File::GetLog() const
 {
-   return Cache::GetInstance().GetLog();
+   return Cache::TheOne().GetLog();
 }
 
-XrdSysTrace* File::GetTrace()
+XrdSysTrace* File::GetTrace() const
 {
-   return Cache::GetInstance().GetTrace();
+   return Cache::TheOne().GetTrace();
 }
 
 void File::insert_remote_location(const std::string &loc)

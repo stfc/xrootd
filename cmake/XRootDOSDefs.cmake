@@ -1,14 +1,16 @@
-#-------------------------------------------------------------------------------
-# Define the OS variables
-#-------------------------------------------------------------------------------
+macro( define_default variable value )
+  if( NOT DEFINED ${variable} )
+    set( ${variable} ${value} )
+  endif()
+endmacro()
 
-include( CheckCXXSourceRuns )
-
-set( LINUX    FALSE )
-set( KFREEBSD FALSE )
-set( Hurd     FALSE )
-set( MacOSX   FALSE )
-set( Solaris  FALSE )
+# Set a default build type of RelWithDebInfo if not set
+if(NOT GENERATOR_IS_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE)
+  if(NOT CMAKE_C_FLAGS AND NOT CMAKE_CXX_FLAGS)
+    set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING
+      "CMake build type for single-configuration generators" FORCE)
+  endif()
+endif()
 
 add_definitions( -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 )
 define_default( LIBRARY_PATH_PREFIX "lib" )
@@ -27,20 +29,25 @@ if( ENABLE_TSAN )
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}  -fsanitize=thread")
 endif()
 
-#-------------------------------------------------------------------------------
-# GCC
-#-------------------------------------------------------------------------------
-if( CMAKE_COMPILER_IS_GNUCXX )
-  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra" )
-  #-----------------------------------------------------------------------------
-  # Set -Werror only for Debug (or undefined) build type or if we have been
-  # explicitly asked to do so
-  #-----------------------------------------------------------------------------
-  if( ( CMAKE_BUILD_TYPE STREQUAL "Debug" OR "${CMAKE_BUILD_TYPE}" STREQUAL ""
-        OR FORCE_WERROR ) )
-    set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror" )
-  endif()
-  set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter" )
+# Set baseline warning level for GCC and Clang
+
+add_compile_options(
+  -Wall
+  -Wextra
+  $<$<NOT:$<BOOL:${APPLE}>>:-Wdeprecated>
+  -Wnull-dereference
+  -Wno-unused-parameter
+  -Wno-vla
+)
+
+# Disable some warnings currently triggered with Clang
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(
+    -Wno-deprecated-copy-with-user-provided-dtor
+    -Wno-unused-const-variable
+    -Wno-unused-private-field
+  )
 endif()
 
 # Disable warnings with nvc++ (for when we are built as ROOT built-in dependency)
@@ -53,8 +60,6 @@ endif()
 # Linux
 #-------------------------------------------------------------------------------
 if( ${CMAKE_SYSTEM_NAME} STREQUAL "Linux" )
-  set( LINUX TRUE )
-  include( GNUInstallDirs )
   set( EXTRA_LIBS rt )
 
   # Check for musl libc with the compiler, since it provides way to detect it
@@ -77,8 +82,6 @@ endif()
 # GNU/kFreeBSD
 #-------------------------------------------------------------------------------
 if( ${CMAKE_SYSTEM_NAME} STREQUAL "kFreeBSD" )
-  set( KFREEBSD TRUE )
-  include( GNUInstallDirs )
   set( EXTRA_LIBS rt )
 endif()
 
@@ -86,17 +89,13 @@ endif()
 # GNU/Hurd
 #-------------------------------------------------------------------------------
 if( ${CMAKE_SYSTEM_NAME} STREQUAL "GNU" )
-  set( Hurd TRUE )
-  include( GNUInstallDirs )
   set( EXTRA_LIBS rt )
 endif()
 
 #-------------------------------------------------------------------------------
-# MacOSX
+# macOS
 #-------------------------------------------------------------------------------
 if( APPLE )
-  set( MacOSX TRUE )
-  
   set(CMAKE_MACOSX_RPATH TRUE)
   set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
   set(CMAKE_INSTALL_RPATH "@loader_path/../lib" CACHE STRING "Install RPATH")
@@ -105,22 +104,6 @@ if( APPLE )
   set( CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations" )
 
   add_definitions( -DLT_MODULE_EXT=".dylib" )
-  define_default( CMAKE_INSTALL_LIBDIR "lib" )
-  define_default( CMAKE_INSTALL_BINDIR "bin" )
-  define_default( CMAKE_INSTALL_MANDIR "share/man" )
-  define_default( CMAKE_INSTALL_INCLUDEDIR "include" )
-  define_default( CMAKE_INSTALL_DATADIR "share" )
-endif()
-
-#-------------------------------------------------------------------------------
-# FreeBSD
-#-------------------------------------------------------------------------------
-if( ${CMAKE_SYSTEM_NAME} STREQUAL "FreeBSD" )
-  define_default( CMAKE_INSTALL_LIBDIR "lib" )
-  define_default( CMAKE_INSTALL_BINDIR "bin" )
-  define_default( CMAKE_INSTALL_MANDIR "man" )
-  define_default( CMAKE_INSTALL_INCLUDEDIR "include" )
-  define_default( CMAKE_INSTALL_DATADIR "share" )
 endif()
 
 #-------------------------------------------------------------------------------
@@ -128,12 +111,6 @@ endif()
 #-------------------------------------------------------------------------------
 if( ${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" )
   define_default( FORCE_32BITS FALSE )
-  define_default( CMAKE_INSTALL_LIBDIR "lib" )
-  define_default( CMAKE_INSTALL_BINDIR "bin" )
-  define_default( CMAKE_INSTALL_MANDIR "man" )
-  define_default( CMAKE_INSTALL_INCLUDEDIR "include" )
-  define_default( CMAKE_INSTALL_DATADIR "share" )
-  set( Solaris TRUE )
   add_definitions( -D__solaris__=1 )
   add_definitions( -DSUNCC -D_REENTRANT -D_POSIX_PTHREAD_SEMANTICS )
   set( EXTRA_LIBS rt  Crun Cstd )
@@ -141,7 +118,17 @@ if( ${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" )
   set( CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -fast" )
   set( CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -fast" )
 
-  define_solaris_flavor()
+  execute_process( COMMAND isainfo
+                   OUTPUT_VARIABLE SOLARIS_ARCH )
+  string( REPLACE " " ";" SOLARIS_ARCH_LIST ${SOLARIS_ARCH} )
+
+  # amd64 (opteron)
+  list( FIND SOLARIS_ARCH_LIST amd64 SOLARIS_AMD64 )
+  if( SOLARIS_AMD64 EQUAL -1 )
+    set( SOLARIS_AMD64 FALSE )
+  else()
+    set( SOLARIS_AMD64 TRUE )
+  endif()
 
   #-----------------------------------------------------------------------------
   # Define solaris version
@@ -164,21 +151,4 @@ if( ${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" )
     set( LIB_SEARCH_OPTIONS NO_DEFAULT_PATH )
     define_default( LIBRARY_PATH_PREFIX "lib/64" )
   endif()
-
-  #-----------------------------------------------------------------------------
-  # Check if the SunCC compiler can do optimizations
-  #-----------------------------------------------------------------------------
-  check_cxx_source_runs(
-  "
-    int main()
-    {
-      #if __SUNPRO_CC > 0x5100
-      return 0;
-      #else
-      return 1;
-      #endif
-    }
-  "
-  SUNCC_CAN_DO_OPTS )
-
 endif()

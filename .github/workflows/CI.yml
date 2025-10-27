@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
     branches-ignore:
@@ -103,6 +106,7 @@ jobs:
     - name: Install dependencies
       run: |
         dnf install -y dnf-plugins-core epel-release git rpmdevtools sudo
+        dnf install -y epel-rpm-macros
         dnf config-manager --set-enabled powertools
 
     - name: Clone repository
@@ -164,9 +168,9 @@ jobs:
         tests/check-headers.sh
 
   alma10beta:
-    name: Alma 10 (beta)
+    name: Alma 10
     runs-on: ubuntu-latest
-    container: almalinux:10-kitten
+    container: almalinux:10
 
     env:
       CMAKE_ARGS: "-DCMAKE_INSTALL_PREFIX=/usr;-DCMAKE_INSTALL_RPATH='$ORIGIN/../$LIB'"

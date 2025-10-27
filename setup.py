@@ -36,7 +36,7 @@ def get_version():
 
     if version is None:
         from datetime import date
-        version = '5.7-rc' + date.today().strftime("%Y%m%d")
+        version = '5.9-rc' + date.today().strftime("%Y%m%d")
 
     if version.startswith('v'):
         version = version[1:]
@@ -96,10 +96,10 @@ setup(name='xrootd',
       description='eXtended ROOT daemon',
       author='XRootD Developers',
       author_email='xrootd-dev@slac.stanford.edu',
-      url='http://xrootd.org',
+      url='https://xrootd.org',
       download_url='https://github.com/xrootd/xrootd/archive/v%s.tar.gz' % version,
       keywords=['XRootD', 'network filesystem'],
-      license='LGPLv3+',
+      license='LGPL-3.0-or-later',
       long_description=open('README.md').read(),
       long_description_content_type='text/markdown',
       packages = ['XRootD', 'XRootD.client', 'pyxrootd'],
@@ -114,7 +114,6 @@ setup(name='xrootd',
       classifiers=[
           "Intended Audience :: Information Technology",
           "Intended Audience :: Science/Research",
-          "License :: OSI Approved :: GNU Lesser General Public License v3 or later (LGPLv3+)",
           "Operating System :: MacOS",
           "Operating System :: POSIX :: Linux",
           "Operating System :: Unix",

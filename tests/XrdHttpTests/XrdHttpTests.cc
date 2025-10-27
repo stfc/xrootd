@@ -4,6 +4,8 @@
 #include "XrdHttp/XrdHttpProtocol.hh"
 #include "XrdHttp/XrdHttpChecksumHandler.hh"
 #include "XrdHttp/XrdHttpReadRangeHandler.hh"
+#include "XrdHttp/XrdHttpHeaderUtils.hh"
+#include "XrdHttpCors/XrdHttpCorsHandler.hh"
 #include <exception>
 #include <gtest/gtest.h>
 #include <string>
@@ -573,4 +575,79 @@ TEST(XrdHttpTests, xrdHttpReadRangeHandlerMultiChunksTwoRanges) {
     const XrdHttpReadRangeHandler::Error &error = h.getError();
     ASSERT_EQ(false, static_cast<bool>(error));
   }
+}
+
+static inline const std::pair<std::string,std::string> encodedDecodedStrings [] {
+  {"zteos64%3AMDAF5PGJ4Wa12g%3D","zteos64:MDAF5PGJ4Wa12g="},
+  //"zteos64%3BAMDAF5PGJ4Wa12g%3B%3B",
+  {"xrootd_tpc-helloworld","xrootd_tpc-helloworld"},
+  {"",""},
+  //"zteos64:%%test",
+  {"Bearer%20token","Bearer token"},
+  {"%20%5B%5D%3A%23%3D%0A%0D"," []:#=\n\r"}
+};
+
+TEST(XrdHttpTests, strEncodeDecodeTest) {
+  for(auto [encoded,decoded]: encodedDecodedStrings) {
+    ASSERT_EQ(decode_str(encoded), decoded);
+    ASSERT_EQ(encoded, encode_str(decoded));
+    ASSERT_EQ(encode_str(decode_str(encoded)), encoded);
+    ASSERT_EQ(decode_str(encode_str(decoded)), decoded);
+  }
+}
+
+static inline const std::pair<std::string,std::string> decodedEncodedOpaque [] {
+  {"",""},
+  {"authz=Bearer token","authz=Bearer%20token"},
+  {"test=test1&authz=Bearer token","test=test1&authz=Bearer%20token"},
+  {"test=","test="},
+  {"test=&authz=Bearer token&authz2=[]","test=&authz=Bearer%20token&authz2=%5B%5D"}
+};
+
+TEST(XrdHttpTests,encodeOpaqueTest) {
+  for(auto [decoded,encoded]: decodedEncodedOpaque) {
+    ASSERT_EQ(encoded,encode_opaque(decoded));
+  }
+}
+
+static inline const std::pair<std::string, std::map<std::string,std::string>> reprDigest[] {
+  {"", {}},
+  {"adler=:test:",{{"adler","test"}}},
+  {"adler=:RXJyb3IK=:",{{"adler","RXJyb3IK="}}},
+  {"adler=:test:, sha256=:sha256value:",{{"adler","test"},{"sha256","sha256value"}}},
+  {"adler=",{}},
+  {"adler=,sha256=:sha256value:",{{"sha256","sha256value"}}},
+  {"azerty",{}},
+  {"adler=:abc:def:",{{"adler","abc:def"}}},
+  {"adler=::abc:",{{"adler",":abc"}}},
+  {"=::value:",{}}
+};
+
+TEST(XrdHttpTests, parseReprDigest) {
+  for(const auto & [input, expectedMap]: reprDigest) {
+    std::map<std::string,std::string> output;
+    XrdHttpHeaderUtils::parseReprDigest(input,output);
+    ASSERT_EQ(expectedMap, output);
+  }
+}
+
+TEST(XrdHttpTests, getCORSAllowOriginHeader) {
+  std::unordered_set<std::string> allowedOrigins = {
+    "https://helloworld.cern.ch",
+    "https://anotherorigins.cern.ch"
+  };
+  XrdHttpCorsHandler corsHandler;
+  for(const auto & allowedOrigin: allowedOrigins) {
+    corsHandler.addAllowedOrigin(allowedOrigin);
+  }
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader("test"));
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(""));
+  for(const auto & allowedOrigin: allowedOrigins) {
+    std::string expected {"Access-Control-Allow-Origin: " + allowedOrigin};
+    ASSERT_EQ(expected,corsHandler.getCORSAllowOriginHeader(allowedOrigin));
+  }
+  corsHandler.addAllowedOrigin("");
+  corsHandler.addAllowedOrigin(" ");
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(""));
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(" "));
 }

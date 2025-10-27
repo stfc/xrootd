@@ -139,13 +139,7 @@ const char *XrdSutBuckStr(int kbck)
 //______________________________________________________________________________
 volatile void *XrdSutMemSet(volatile void *dst, int c, int len)
 {
-   // To avoid problems due to compiler optmization
-   // Taken from Viega&Messier, "Secure Programming Cookbook", O'Really, #13.2
-   // (see discussion there)
-   volatile char *buf;
-
-   for (buf = (volatile char *)dst; len; buf[--len] = c) {}
-   return dst;
+   return memset((void*)dst, c, len);
 }
 
 #ifndef USE_EXTERNAL_GETPASS
@@ -170,7 +164,7 @@ int XrdSutGetPass(const char *prompt, XrdOucString &passwd)
          if (pw[i] > 0x20) pw[k++] = pw[i];
       pw[k] = 0;
       passwd = pw;
-      XrdSutMemSet((volatile void *)pw,0,len);
+      XrdSutMemSet((void *)pw,0,len);
    } else {
       DEBUG("error from getpass");
       return -1;
@@ -315,8 +309,8 @@ int XrdSutTimeString(int t, char *st, int opt)
    //     24Apr2006-091023         (opt = 1)
    // The buffer st must be supplied by the caller to contain at least 20.
    // This length is returned when calling the function with t=-1 
-   static char month[12][4] = {"Jan","Feb","Mar","Apr","May","Jun",
-                               "Jul","Aug","Sep","Oct","Nov","Dec"};
+   static const char month[12][4] = {"Jan","Feb","Mar","Apr","May","Jun",
+                                     "Jul","Aug","Sep","Oct","Nov","Dec"};
    static short flen = strlen("24Apr2006:09:10:23");
 
    // Check if the length is required

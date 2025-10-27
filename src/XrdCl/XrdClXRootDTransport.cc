@@ -334,7 +334,7 @@ namespace XrdCl
       uint32_t bodySize = *(uint32_t*)(message.GetBuffer(4));
       Log *log = DefaultEnv::GetLog();
       log->Dump( XRootDTransportMsg, "[msg: %p] Expecting %d bytes of message "
-                 "body", &message, bodySize );
+                 "body", (void*)&message, bodySize );
 
       return XRootDStatus( stOK, suDone );
     }
@@ -418,7 +418,7 @@ namespace XrdCl
     XRootDStatus st = XRootDTransport::UnMarchalStatusMore( message );
     if( !st.IsOK() && st.code == errDataError )
     {
-      log->Error( XRootDTransportMsg, "[msg: %p] %s", &message,
+      log->Error( XRootDTransportMsg, "[msg: %p] %s", (void*)&message,
                   st.GetErrorMessage().c_str() );
       return st;
     }
@@ -426,7 +426,7 @@ namespace XrdCl
     if( !st.IsOK() )
     {
       log->Error( XRootDTransportMsg, "[msg: %p] Failed to unmarshall status body.",
-                  &message );
+                  (void*)&message );
       return st;
     }
 
@@ -469,6 +469,10 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info)
+      return XRootDStatus(stFatal, errInternal);
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     if( info->stream.size() <= handShakeData->subStreamId )
@@ -496,6 +500,14 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg,
+        "[%s] Internal error: no channel info",
+        handShakeData->streamName.c_str());
+      return XRootDStatus(stFatal, errInternal);
+    }
+
     XRootDStreamInfo &sInfo = info->stream[handShakeData->subStreamId];
 
     //--------------------------------------------------------------------------
@@ -655,6 +667,13 @@ namespace XrdCl
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
 
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg,
+        "[%s] Internal error: no channel info",
+        handShakeData->streamName.c_str());
+      return XRootDStatus(stFatal, errInternal);
+    }
+
     XRootDStreamInfo &sInfo = info->stream[handShakeData->subStreamId];
 
     //--------------------------------------------------------------------------
@@ -729,6 +748,14 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg,
+        "[%s] Internal error: no channel info",
+        handShakeData->streamName.c_str());
+      return false;
+    }
+
     XRootDStreamInfo &sInfo = info->stream[handShakeData->subStreamId];
     return ( sInfo.status == XRootDStreamInfo::Connected );
   }
@@ -741,8 +768,15 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
     Env *env = DefaultEnv::GetEnv();
     Log *log = DefaultEnv::GetLog();
+
+    if (!info) {
+      log->Error(XRootDTransportMsg,
+        "Internal error: no channel info, behaving as if TTL has elapsed");
+      return true;
+    }
 
     //--------------------------------------------------------------------------
     // Check the TTL settings for the current server
@@ -790,6 +824,12 @@ namespace XrdCl
     Env *env = DefaultEnv::GetEnv();
     Log *log = DefaultEnv::GetLog();
 
+    if (!info) {
+      log->Error(XRootDTransportMsg,
+        "Internal error: no channel info, behaving as if stream is broken");
+      return true;
+    }
+
     int streamTimeout = DefaultStreamTimeout;
     env->GetInt( "StreamTimeout", streamTimeout );
 
@@ -833,6 +873,13 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg,
+        "Internal error: no channel info, cannot multiplex");
+      return PathID(0,0);
+    }
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     //--------------------------------------------------------------------------
@@ -996,6 +1043,12 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg, "Internal error: no channel info");
+      return 1;
+    }
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     //--------------------------------------------------------------------------
@@ -1469,6 +1522,12 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg, "Internal error: no channel info");
+      return 0;
+    }
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     uint16_t nbConnected = 0;
@@ -1487,6 +1546,12 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info) {
+      DefaultEnv::GetLog()->Error(XRootDTransportMsg, "Internal error: no channel info");
+      return;
+    }
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     CleanUpProtection( info );
@@ -1516,6 +1581,10 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
+
+    if (!info)
+      return XRootDStatus(stFatal, errInternal);
+
     XrdSysMutexHelper scopedLock( info->mutex );
 
     switch( query )
@@ -1586,7 +1655,7 @@ namespace XrdCl
     {
       log->Error( XRootDTransportMsg, "Message %p, stream [%d, %d] is a "
                   "response that we're no longer interested in (timed out)",
-                  &msg, rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
+                  (void*)&msg, rsp->hdr.streamid[0], rsp->hdr.streamid[1] );
       //------------------------------------------------------------------------
       // If it is kXR_waitresp there will be another one,
       // so we don't release the sid yet
@@ -1770,6 +1839,7 @@ namespace XrdCl
     int notlsok = DefaultNoTlsOK;
     env->GetInt( "NoTlsOK", notlsok );
 
+
     if( notlsok )
       return info->encrypted;
 
@@ -1843,7 +1913,8 @@ namespace XrdCl
   {
     XRootDChannelInfo *info = 0;
     channelData.Get( info );
-    if( !bool( info->bindSelector ) )
+
+    if(!info || !info->bindSelector)
       return url;
 
     return URL( info->bindSelector->Get() );
@@ -2217,7 +2288,7 @@ namespace XrdCl
 
     loginReq->requestid = kXR_login;
     loginReq->pid       = ::getpid();
-    loginReq->capver[0] = kXR_asyncap | kXR_ver005;
+    loginReq->capver[0] = (kXR_char) kXR_asyncap | (kXR_char) kXR_ver005;
     loginReq->dlen      = cgiLen;
     loginReq->ability   = kXR_fullurl | kXR_readrdok | kXR_lclfile | kXR_redirflags;
 #ifdef WITH_XRDEC
@@ -2927,6 +2998,8 @@ namespace XrdCl
           o << "none";
         else
         {
+          if( sreq->options & kXR_compress )
+            o << "kXR_compress ";
           if( sreq->options & kXR_delete )
             o << "kXR_delete ";
           if( sreq->options & kXR_force )
@@ -2936,17 +3009,23 @@ namespace XrdCl
           if( sreq->options & kXR_new )
             o << "kXR_new ";
           if( sreq->options & kXR_nowait )
-            o << "kXR_delete ";
+            o << "kXR_nowait ";
           if( sreq->options & kXR_open_apnd )
             o << "kXR_open_apnd ";
           if( sreq->options & kXR_open_read )
             o << "kXR_open_read ";
           if( sreq->options & kXR_open_updt )
             o << "kXR_open_updt ";
+          if( sreq->options & kXR_open_wrto )
+            o << "kXR_open_wrto ";
           if( sreq->options & kXR_posc )
             o << "kXR_posc ";
+          if( sreq->options & kXR_prefname )
+            o << "kXR_prefname ";
           if( sreq->options & kXR_refresh )
             o << "kXR_refresh ";
+          if( sreq->options & kXR_4dirlist )
+            o << "kXR_4dirlist ";
           if( sreq->options & kXR_replica )
             o << "kXR_replica ";
           if( sreq->options & kXR_seqio )
@@ -3059,6 +3138,47 @@ namespace XrdCl
         o << ", ";
         o << "offset: " << sreq->offset << ", ";
         o << "size: " << sreq->dlen << ")";
+        break;
+      }
+
+      //------------------------------------------------------------------------
+      // kXR_fattr
+      //------------------------------------------------------------------------
+      case kXR_fattr:
+      {
+        ClientFattrRequest *sreq = (ClientFattrRequest *)msg;
+        int nattr = sreq->numattr;
+        int options = sreq->options;
+        o << "kXR_fattr";
+        switch (sreq->subcode) {
+          case kXR_fattrGet:
+            o << "Get";
+            break;
+          case kXR_fattrSet:
+            o << "Set";
+            break;
+          case kXR_fattrList:
+            o << "List";
+            break;
+          case kXR_fattrDel:
+            o << "Delete";
+            break;
+          default:
+            o << " unknown subcode: " << sreq->subcode;
+            break;
+        }
+        o << " (handle: " << FileHandleToStr( sreq->fhandle );
+        o << std::setbase(10);
+        if (nattr)
+          o << ", numattr: " << nattr;
+        if (options) {
+          o << ", options: ";
+          if (options & 0x01)
+            o << "new";
+          if (options & 0x10)
+            o << "list values";
+        }
+        o << ", total size: " << req->dlen << ")";
         break;
       }
 

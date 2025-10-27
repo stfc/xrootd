@@ -76,7 +76,6 @@ class XrdOucTokenizer;
 class XrdSecProtect;
 class XrdSecProtector;
 class XrdSfsDirectory;
-class XrdSfsFACtl;
 class XrdSfsFileSystem;
 class XrdSecProtocol;
 class XrdBuffer;
@@ -89,9 +88,12 @@ class XrdXrootdJob;
 class XrdXrootdMonitor;
 class XrdXrootdPgwCtl;
 class XrdXrootdPio;
+class XrdXrootdRedirPI;
 class XrdXrootdStats;
-class XrdXrootdWVInfo;
 class XrdXrootdXPath;
+
+struct XrdSfsFACtl;
+struct XrdXrootdWVInfo;
 
 /******************************************************************************/
 /*                   N a m e s p a c e   X r d X r o o t d                    */
@@ -99,6 +101,8 @@ class XrdXrootdXPath;
   
 namespace XrdXrootd
 {
+struct netInfo;
+
 /******************************************************************************/
 /*                            g d C a l l B a c k                             */
 /******************************************************************************/
@@ -314,6 +318,9 @@ static int   ConfigSecurity(XrdOucEnv &xEnv, const char *cfn);
                      const char *Path, char *Cgi);
        int   fsOvrld(char opc, const char *Path, char *Cgi);
        int   fsRedirNoEnt(const char *eMsg, char *Cgi, int popt);
+XrdXrootd::
+   netInfo*  fsRedirIP(const char *trg, int port);
+       int   fsRedirPI(const char *trg, int port, int trglen);
        int   getBuff(const int isRead, int Quantum);
        char *getCksType(char *opaque, char *cspec=0, int cslen=0);
        int   getData(const char *dtype, char *buff, int blen);
@@ -330,6 +337,7 @@ static int   CheckTLS(const char *tlsProt);
 static bool  ConfigFS(XrdOucEnv &xEnv, const char *cfn);
 static bool  ConfigFS(const char *path, XrdOucEnv &xEnv, const char *cfn);
 static bool  ConfigGStream(XrdOucEnv &myEnv, XrdOucEnv *urEnv);
+static bool  ConfigRedirPI(const char*, XrdOucEnv&, const char*, const char*);
 static int   Squash(char *);
        int   StatGen(struct stat &buf, char *xxBuff, int xxLen, bool xa=false);
 static int   xapath(XrdOucStream &Config);
@@ -350,6 +358,8 @@ static char *xmondest(const char *what, char *val);
 static int   xmongs(XrdOucStream &Config);
 static bool  xmongsend(XrdOucStream &Config, char *val, char *&dest,
                        int &opt, int &fmt, int &hdr);
+static int   xrdl(XrdOucStream &Config);
+static char* xrdlopt(XrdOucStream &Config, char* val);
 static int   xred(XrdOucStream &Config);
 static int   xred_clnt(XrdOucStream &Config, char *hP[2], int rPort[2]);
 static bool  xred_php(char *val, char *hP[2], int rPort[2], const char *what,
@@ -393,6 +403,7 @@ static XrdScheduler         *Sched;     // System scheduler
 static XrdBuffManager       *BPool;     // Buffer manager
 static XrdSysError          &eDest;     // Error message handler
 static XrdNetPMark          *PMark;     // Packet marking API
+static XrdXrootdRedirPI     *RedirPI;   // Redirect plugin
 static const char           *myInst;
 static const char           *TraceID;
 static int                   RQLxist;   // Something is present in RQList
@@ -419,6 +430,7 @@ static int                 readWait;
 static int                 Port;
 static int                 Window;
 static int                 tlsPort;
+static int                 redirIPHold;
 static char               *Notify;
 static const char         *myCName;
 static int                 myCNlen;

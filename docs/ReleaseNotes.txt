@@ -6,6 +6,209 @@ Release Notes
 =============
 
 -------------
+Version 5.9.0
+-------------
+
++ **New Features**
+  **[Server]** Implement udprefresh option for the xrd.network directive (#1873)
+  **[Server]** New redirect intercept plugin for SENSE
+  **[XrdCors]** Add CORS plugin to XrdHttp (#2541, #2552)
+  **[XrdHttp]** Make HTTP's maximum open delay configurable via http.maxdelay option (#2532)
+  **[XrdNet]** XRootD monitoring information now follows DNS changes (#1873)
+  **[XrdPfc]** Implement URL CGI parameters for setting block-size and max number of blocks for prefetching on per file basis (#2606)
+  **[XrdTls]** Allow disabling of X.509 client auth (#2269)
+
++ **Major bug fixes**
+  **[XrdCl]** Avoid poller callbacks blocking each other (#2578, #2582)
+  **[XrdCl]** Fix URL object lifetime issue causing XCache crash (#2587, #2599)
+  **[XrdSsi]** Fix XrdSsi server crash due to use after free (#2479, #2481, #2523)
+  **[XrdSys]** Fix a race condition in IOEvents that might cause segfault
+  **[XrdCl]** Fix xrdcp crash when running with record plugin enabled (#2579)
+  **[XrdPfc]** Fix deadlock when opening/closing many files concurrently (#2561, #2563)
+
++ **Minor bug fixes**
+  **[Server]** Make sure tread create counter increases monotonically (#2597)
+  **[XrdCl]** PollerBuiltIn, proection against adding socket during shutdown
+  **[XrdHttp]** Do a clean TLS shutdown for HTTPS (#2565)
+  **[XrdHttp]** Fix file renaming with token authentication after redirection (#2550, #2570)
+  **[XrdHttpTpc]** Improve mapping of error codes to HTTP status in TPC transfers (#2591)
+  **[XrdOssCsi]** Handle pathnames not starting with slash and allow access to FD (#2581, #2594)
+  **[XrdOss]** Workaround Mac OS X pecularity with RLIMIT_NOFILE (#2577)
+  **[XrdOuc]** Fix memory leak in XrdOucGatherConf (#2583)
+  **[XrdPfc]** Return error code for set cache evict if the file does not exist (#2608)
+  **[XrdPosix]** Add a missed file object unlock
+  **[XrdPosix]** Set errno for errors from pgRead and pgWrite
+  **[XrdXrootd]** Fix multi-stream copy with xrdcp through XCache (#2592, #2593)
+
++ **Miscellaneous**
+  **[CMake]** Downgrade -Werror=null-dereference back to just a warning (#2571)
+  **[Tests]** Add an xcache test, using OssCsi to flag corruption
+  **[Tests]** Extend test suite with more tests with token based authentication
+  **[XrdHttp]** Set the sequential I/O flag for simple HTTP requests
+  **[XrdOssStats]** Add documentation for the OSS statistics plugin
+  **[XrdPfc]** Cleanup processing and storage of pfc.dirstats configuration parameters
+  **[XrdPfc]** Pass full environment into the OSS library loader
+  **[XrdThrottle]** Modify XrdThrottle to be an OSS plugin (#2521)
+  **[XrdThrottle]** Re-engineered concurrency limits (#2521)
+
+-------------
+Version 5.8.4
+-------------
+
++ **Major bug fixes**
+  **[XrdPfc]** Fix XCache crash caused by use-after-free (#2533)
+  **[XrdSecsss]** Fix null pointer dereference in XrdSecsssKT::getKey()
+  **[XrdXrootd]** Fix server segfaults while computing checksums (#2534)
+
++ **Minor bug fixes**
+  **[CMake]** Remove -D from ${XRootD_DEFINITIONS} in XRootDConfig.cmake (#2543)
+  **[Server]** Improve rename error message when it fails due to overwrite
+  **[Tests]** Fix memory leak in scitokens test reported by adress sanitizer (#2554)
+  **[XrdApps]** Fix memory leak reported by adress sanitizer (#2553)
+  **[XrdCl]** Add missing CpRetryPolicy to defaults
+  **[XrdCl]** Avoid losing error response during retry at different server (#2537)
+  **[XrdCl]** Do not apply timeout of Channel to its redirect-collapsed replacement (#2549)
+  **[XrdCl]** Fix recursive copies with TLS enabled (#2490)
+  **[XrdCl]** Request for hostname in replies to locate requests (#2540, #2551)
+  **[XrdOuc]** Fix strncpy parameter overlap reported by address sanitizer
+  **[XrdOssCsi]** Do not write sparse tag files when using nofill option (#2557)
+  **[XrdPosix]** Fix one-definition-rule (ODR) violations in 32bit systems (#2032)
+  **[XrdPosix]** Match function prototypes with respective syscalls (#2032)
+  **[XrdSecsss]** Avoid potential use of uninitialized memory in XrdSecsssKT::ktDecode0()
+
++ **Miscellaneous**
+  **[CI]** Add GCC/Clang compiler problem matcher to GitHub Actions
+  **[CMake]** Add option to enable sanitizers in test.cmake
+  **[CMake]** Display C/C++ compile flags in configuration summary
+  **[Misc]** Add GitHub issue templates
+  **[XrdCl]** Add missing CpRetryPolicy to list of defaults
+  **[XrdOssCsi]** Use std::less to compare pointers (#2557)
+  **[Tests]** Add simple integration tests for XrdPosix and XrdDig
+  **[Tests]** Add test of connection failure or hostname failure after redirect (#2537)
+
+-------------
+Version 5.8.3
+-------------
+
++ **Major bug fixes**
+  **[XrdCl]** Fix occasionally missed reply messages from the server (#2516)
+  **[XrdHttp]** Fix crash due to thread-safety issue in bridge redrive (#2503)
+  **[XrdPfc]** Fix deadlock at startup (#2505, #2507)
+  **[Server]** Fix crash caused by race condition in XrdPosix callback handler (#2517)
+
++ **Minor bug fixes**
+  **[XrdHttp]** Fix HTTP protocol errors when using `X-Transfer-Status` (#2443)
+  **[XrdOss]** Fix file access mode detection (#2510)
+  **[XrdPfc]** Fix file access mode detection (#2508)
+  **[XrdPosix]** Correct file open mode conversion (#2510)
+  **[XrdCl]** Create directory target by default with recursive copies (#2501)
+
++ **Miscellaneous**
+  **[CMake]** Add Xrd/XrdSendQ.hh to list of installed private headers (#2497)
+  **[XrdHttp]** Add unit tests for read failures during transfers (#2443)
+  **[Python]** Replace license classifier with SPDX license expression (#2502)
+  **[XrdHttp]** Add initial webdav error codes for file path and permission errors (#2261)
+
+-------------
+Version 5.8.2
+-------------
+
++ **Minor bug fixes**
+  **[Server]** Correct handling of wait during redrive (#2480)
+  **[Server]** Enforce reasonable default thread limit of 8192 (#2468)
+  **[XrdHttp]** Add missing default HTTP status messages (#2486)
+  **[XrdHttp]** Handle '=' sign correctly in URL encoding/decoding (#2491)
+  **[XrdOuc]** Redact URL-encoded tokens with '%' character (#2500)
+  **[XrdPosix]** Map operation timeouts to ETIME (#2482)
+  **[XrdPss]** Implement the auto-stat protocol for XrdPss (#2454)
+  **[XrdSecsss]** Fix issues reported by clang-tidy static analysis
+  **[XrdSecsss]** Protect against buffer overflow due to large key name
+
++ **Miscellaneous**
+  **[CMake]** General modernization of the build system (#2453)
+  **[CMake]** Set stricter baseline compiler warning level
+  **[Misc]** Fix compiler warnings with C++20/23, GCC 15 and Clang 20
+  **[RPM]** Revert move to sysusers.d config file for user/group creation
+  **[Tests]** Set a discovery timeout for gtest_discover_tests (#2485)
+
+-------------
+Version 5.8.1
+-------------
+
++ **New Features**
+  **[XrdPss]** Enable crc32c as a valid checksum for XrdPss (#2457)
+
++ **Major bug fixes**
+  **[PMark]** Fix null pointer dereference when initializing packet marking handle
+  **[XrdSsi]** Fix null pointer dereference in XrdSsiFileReq::Finalize() (#2469)
+
++ **Minor bug fixes**
+  **[CMake]** Fix install rule for XrdPfc headers (#2478)
+  **[RPM]** Workaround for %pre being evaluated before sources are unpacked (#2460)
+  **[XrdHttp]** Do not use base64 encoding with crc32c checksums (#2456)
+  **[XrdPfc]** Add XrdPfcPurgeQuota plugin to install targets
+  **[XrdThrottle]** Fix Features() function implementation (#2483)
+  **[XrdTpc]** Fix third-party copy transfers of small files with curl 8.x (#2470, #2475)
+
++ **Miscellaneous**
+  **[CI]** Move Fedora builds to Fedora 42
+  **[Misc]** Fix GCC 15 compiler warnings
+  **[Tests]** Add new tests for third-party copy transfers with tokens (#2441)
+  **[Tests]** Add simple integration test for XCache (#2477)
+  **[XrdCl]** Implement description for kXR_fattr requests
+  **[XrdCl]** Update description of kXR_open requests with remaining flags
+  **[XrdOuc]** Use correct format for pthread_t on GNU/Hurd (#2465)
+  **[XrdPss]** Include environment CGI info when proxying checksum
+  **[XrdThrottle]** Ensure all virtuals are overrides (#2483)
+  **[XrdTls]** Fix deprecation warnings with OpenSSL 3.4 and later
+
+-------------
+Version 5.8.0
+-------------
+
++ **New Features**
+  **[CMake]** XRootDConfig.cmake now defines XRootD_BIN_DIR variable (#2432)
+  **[CMake]** XRootDConfig.cmake now defines XRootD_DEFINITIONS variable (#2369)
+  **[CMake]** XRootDConfig.cmake now exports library targets (#2415)
+  **[Server]** Add generic interface to report summary values for monitoring (XrdMonitor)
+  **[Server]** Add stat flag to indicate a cached stat response (#2435)
+  **[Server]** Allow bypass of mtime check to declare a checksum as stale (#2338)
+  **[XrdCeph]** Merge back features and bug fixes developed at RAL (#2342)
+  **[XrdCl]** Add support for IPv4 mapped IPv6 addresses (#2422)
+  **[XrdCl]** Improve client performance when using multiple streams (#1938)
+  **[XrdHttp]** Add new http.staticheader directive to configure static HTTP headers (#2389)
+  **[XrdHttp]** Send Age header for cached files in GET and HEAD requests (#2349, #2437)
+  **[XrdOssStats]** New OSS statistics/monitoring plugin (#2279)
+  **[XrdPfc]** New ResourceMonitor and PurgePlugin for XCache (#2436)
+  **[XrdTpcTPC]** Indicate to the oss layer which kind of HTTP TPC operation is performed (open) (#2427, #2429)
+
++ **Major bug fixes**
+  **[XrdPfc]** Fix segmentation fault under load (#2420, #2421)
+
++ **Minor bug fixes**
+  **[Server]** XRootD drops poller events on macOS (#2212)
+  **[XrdCl/Server]** Replace mistakenly used kXR_mkdir with kXR_mkpath (#2393)
+  **[XrdCl]** Fix URL parsing to not accept invalid parameters (#1960)
+  **[XrdHttp]** Quote the resource when handling a redirect (#2430)
+  **[XrdNet]** Fix name resolution for long hostnames seen in Kubernetes (#2307)
+  **[XrdNet]** Fix xrootd.pmark defsfile directive (#2449)
+  **[XrdPfc]** Fix usage of saveptr in strtok_r used by PathTokenizer (#2455)
+  **[XrdPosix]** Fix XrdPosix headers when called in C context (#2424)
+  **[XrdPosix]** Fixes for XrdPosix on macOS (#2434)
+  **[XrdPosix]** Return entry type DT_UNKNOWN in XrdPosixDir::nextEntry() (#2347)
+  **[XrdScheduler]** Add control of NPROC limit reset (#2396, #2407)
+  **[xrdfs]** Disallow renaming a directory into a subdirectory of itself (#2250)
+
++ **Miscellaneous**
+  **[CI]** Add Ubuntu builds on ARM 64bit to GitHub Actions
+  **[CMake]** Remove builtin isa-l library from repository
+  **[RPM]** Drop support for CentOS 7 in xrootd.spec
+  **[RPM]** Use sysusers.d config file for creating the xrootd system user (#2433)
+  **[Tests]** Add new concurrent upload stress test for HTTP protocol (#2408)
+  **[XrdHttp]** Add trailing slash to directories in listing (#2428)
+  **[XrdTpcTPC]** Adapt packet marking to fit the new specifications (#2322, #2359)
+
+-------------
 Version 5.7.3
 -------------
 

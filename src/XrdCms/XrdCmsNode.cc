@@ -226,7 +226,7 @@ void XrdCmsNode::Delete(XrdSysFusedMutex &gMutex)
    if (doDel) delete this;
       else {char eBuff[256];
             snprintf(eBuff, sizeof(eBuff),
-                     " (%p) delete timeout; node object lost!", this);
+                     " (%p) delete timeout; node object lost!", (void*)this);
             Say.Emsg("Delete", Ident, eBuff);
            }
 }
@@ -578,7 +578,7 @@ const char *XrdCmsNode::do_Locate(XrdCmsRRData &Arg)
 // Encode if type into the options
 //
    Sel.Opts = static_cast<int>(ifType) & XrdCmsSelect::ifWant;
-   lsopts   = static_cast<XrdCmsCluster::CmsLSOpts>(lsopts | ifType);
+   lsopts   = lsopts | static_cast<XrdCmsCluster::CmsLSOpts>(ifType);
 
 // Grab various options
 //
@@ -1040,7 +1040,7 @@ int XrdCmsNode::do_SelAvoid(XrdCmsRRData &Arg, XrdCmsSelect &Sel,
        return -1;
       }
 
-// We suceeded, indicate selection can proceed.
+// We succeeded, indicate selection can proceed.
 //
    return 0;
 }

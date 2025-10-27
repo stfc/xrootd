@@ -2,9 +2,10 @@ if(NOT BUILD_HTTP)
     return()
 endif()
 
-add_executable(xrdhttp-unit-tests XrdHttpTests.cc)
+add_executable(xrdhttp-unit-tests XrdHttpTests.cc
+        ${PROJECT_SOURCE_DIR}/src/XrdHttpCors/XrdHttpCorsHandler.cc)
 
-target_link_libraries(xrdhttp-unit-tests XrdHttpUtils GTest::GTest GTest::Main)
-target_include_directories(xrdhttp-unit-tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
+target_link_libraries(xrdhttp-unit-tests XrdHttpUtils GTest::GTest GTest::Main XrdUtils)
 
-gtest_discover_tests(xrdhttp-unit-tests)
+gtest_discover_tests(xrdhttp-unit-tests
+  PROPERTIES DISCOVERY_TIMEOUT 10)

@@ -52,7 +52,7 @@ else()
   message(WARNING "Failed to determine XRootD version, using a timestamp as fallback."
     "You can override this by setting -DXRootD_VERSION_STRING=x.y.z during configuration.")
   set(XRootD_VERSION_MAJOR 5)
-  set(XRootD_VERSION_MINOR 7)
+  set(XRootD_VERSION_MINOR 9)
   set(XRootD_VERSION_PATCH 0)
   set(XRootD_VERSION_TWEAK 0)
   set(XRootD_VERSION_NUMBER 1000000)
@@ -66,6 +66,8 @@ endif()
 
 string(REGEX MATCH "[0-9]+[.]*[0-9]*[.]*[0-9]*[.]*[0-9]*(-rc)?[0-9].*"
   XRootD_VERSION ${XRootD_VERSION_STRING})
+
+set(PLUGIN_VERSION ${XRootD_VERSION_MAJOR} CACHE STRING "XRootD Plugin Version")
 
 message(DEBUG "XRootD_VERSION_STRING = '${XRootD_VERSION_STRING}'")
 message(DEBUG "XRootD_VERSION_NUMBER = '${XRootD_VERSION_NUMBER}'")

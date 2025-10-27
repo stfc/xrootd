@@ -41,7 +41,6 @@
 #endif
 #endif
 
-#ifdef HAVE_FUSE
 #include <fuse.h>
 #include <fuse/fuse_opt.h>
 #include <cctype>
@@ -814,7 +813,7 @@ static int xrootdfs_read(const char *path, char *buf, size_t size, off_t offset,
     int res;
 
     fd = (int) fi->fh;
-    if (fi->flags & O_RDWR) XrdFfsWcache_flush(fd);
+    if ((fi->flags & O_ACCMODE) == O_RDWR) XrdFfsWcache_flush(fd);
 
     if (usingEC)
     {
@@ -829,7 +828,7 @@ static int xrootdfs_read(const char *path, char *buf, size_t size, off_t offset,
         size = (size_t)(fsize - offset) > size ? size : fsize - offset; 
         // Restrict the use of read cache to O_DIRECT use case 
         // See comment in XRdFfsWcache_pread()
-        if ( ! (fi->flags & O_RDWR) && (fi->flags & O_DIRECT) )
+        if ( ((fi->flags & O_ACCMODE) != O_RDWR) && (fi->flags & O_DIRECT) )
             res = XrdFfsWcache_pread(fd, buf, size, offset);
         else
             res = XrdFfsPosix_pread(fd, buf, size, offset);
@@ -949,7 +948,7 @@ static int xrootdfs_release(const char *path, struct fuse_file_info *fi)
 
     return 0;
 */
-    if (xrootdfs.cns == NULL || (fi->flags & 0100001) == (0100000 | O_RDONLY))
+    if (xrootdfs.cns == NULL)
         return 0;
 
     int res;
@@ -1495,11 +1494,3 @@ int main(int argc, char *argv[])
 
     return fuse_main(args.argc, args.argv, &xrootdfs_oper, NULL);
 }
-#else
-
-int main(int argc, char *argv[])
-{
-    printf("This platform does not have FUSE; xrootdfs cannot be started!");
-    exit(13);
-}
-#endif

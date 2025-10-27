@@ -114,9 +114,9 @@ void XrdFfsWcache_init(int basefd, int maxfd)
     else
     {
         char *savptr;
-        int nbdat = atoi(strtok_r(getenv("XRDCL_EC"), ",", &savptr));
+        ssize_t nbdat = atoi(strtok_r(getenv("XRDCL_EC"), ",", &savptr));
         strtok_r(NULL, ",", &savptr);
-        int chsz = atoi(strtok_r(NULL, ",", &savptr));
+        ssize_t chsz = atoi(strtok_r(NULL, ",", &savptr));
         XrdFfsRcacheBufsize = nbdat * chsz; 
     }
     if (getenv("XROOTDFS_WCACHESZ"))
@@ -137,9 +137,7 @@ int XrdFfsWcache_create(int fd, int flags)
 
     XrdFfsWcacheFbufs[fd].offset = 0;
     XrdFfsWcacheFbufs[fd].len = 0;
-    // "flag & O_RDONLY" is not equivalant to ! (flags & O_RDWR) && ! (flags & O_WRONLY)
-    if ( ! (flags & O_RDWR) &&     
-         ! (flags & O_WRONLY) &&
+    if ( ((flags & O_ACCMODE) == O_RDONLY) &&
          (flags & O_DIRECT) )  // Limit the usage scenario of the read cache 
     {
         XrdFfsWcacheFbufs[fd].buf = (char*)malloc(XrdFfsRcacheBufsize);

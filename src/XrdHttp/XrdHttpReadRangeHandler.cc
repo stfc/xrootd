@@ -97,6 +97,14 @@ bool XrdHttpReadRangeHandler::isFullFile()
 }
 
 //------------------------------------------------------------------------------
+//! return the maximum number of ranges that may be requested
+//------------------------------------------------------------------------------
+size_t XrdHttpReadRangeHandler::getMaxRanges() const
+{
+  return rawUserRanges_.empty() ? 1 : rawUserRanges_.size();
+}
+
+//------------------------------------------------------------------------------
 //! indicates a single range (implied whole file, or single range) or empty file
 //------------------------------------------------------------------------------
 bool XrdHttpReadRangeHandler::isSingleRange()
@@ -175,7 +183,7 @@ void XrdHttpReadRangeHandler::NotifyError()
   if( error_ )
     return;
 
-  error_.set( 500, "An error occured." );
+  error_.set( 500, "An error occurred." );
 }
 
 //------------------------------------------------------------------------------

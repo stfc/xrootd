@@ -723,6 +723,18 @@ int XrdPssDir::Readdir(char *buff, int blen)
 }
 
 /******************************************************************************/
+/*                               S t a t R e t                                */
+/******************************************************************************/
+int XrdPssDir::StatRet(struct stat *buff)
+{
+   if (!myDir) return -XRDOSS_E8002;
+
+   auto rc = XrdPosixXrootd::StatRet(myDir, buff);
+   if (rc) return -rc;
+   return XrdOssOK;
+}
+
+/******************************************************************************/
 /*                                 C l o s e                                  */
 /******************************************************************************/
   
@@ -776,7 +788,7 @@ int XrdPssFile::Open(const char *path, int Oflag, mode_t Mode, XrdOucEnv &Env)
    char pbuff[PBsz];
    int  rc;
    bool tpcMode = (Oflag & O_NOFOLLOW) != 0;
-   bool rwMode  = (Oflag & (O_WRONLY | O_RDWR | O_APPEND)) != 0;
+   bool rwMode  = (Oflag & O_ACCMODE) != O_RDONLY;
    bool ucgiOK  = true;
    bool ioCache = (Oflag & O_DIRECT);
 
@@ -1300,7 +1312,10 @@ int XrdPssFile::Ftruncate(unsigned long long flen)
 
 int XrdPssSys::Info(int rc)
 {
-   XrdPosixXrootd::QueryError(XrdProxy::ecMsg.Msg());
+   std::string psxMsg;
+   int n = XrdPosixXrootd::QueryError(psxMsg);
+
+   XrdProxy::ecMsg.Set(n, psxMsg);
    return -rc;
 }
   

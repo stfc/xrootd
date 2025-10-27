@@ -90,7 +90,7 @@ XrdOucCache *XrdOucGetCache(XrdSysLogger *logger,
 
    Cache &instance = Cache::CreateInstance(logger, env);
 
-   if (! instance.Config(config_filename, parameters))
+   if (! instance.Config(config_filename, parameters, env))
    {
       err.Say("Config Proxy file cache initialization failed.");
       return 0;
@@ -107,7 +107,7 @@ XrdOucCache *XrdOucGetCache(XrdSysLogger *logger,
          XrdSysThread::Run(&tid, ProcessWriteTaskThread, 0, 0, "XrdPfc WriteTasks ");
       }
 
-      if (instance.RefConfiguration().m_prefetch_max_blocks > 0)
+      if (instance.is_prefetch_enabled())
       {
          XrdSysThread::Run(&tid, PrefetchThread, 0, 0, "XrdPfc Prefetch ");
       }
@@ -444,7 +444,7 @@ File* Cache::GetFile(const std::string& path, IO* io, long long off, long long f
 
    if (filesize >= 0)
    {
-      file = File::FileOpen(path, off, filesize);
+      file = File::FileOpen(path, off, filesize, io->GetInput());
    }
 
    {
@@ -638,6 +638,7 @@ void Cache::dec_ref_cnt(File* f, bool high_debug)
       {
          XrdSysCondVarHelper lock(&m_active_cond);
          m_active.erase(act_it);
+         m_active_cond.Broadcast();
       }
 
       if (m_gstream)
@@ -1069,7 +1070,7 @@ int Cache::Prepare(const char *curl, int oflags, mode_t mode)
    std::string i_name = f_name + Info::s_infoExtension;
 
    // Do not allow write access.
-   if (oflags & (O_WRONLY | O_RDWR | O_APPEND | O_CREAT))
+   if ((oflags & O_ACCMODE) != O_RDONLY)
    {
       TRACE(Warning, "Prepare write access requested on file " << f_name << ". Denying access.");
       return -EROFS;
@@ -1242,8 +1243,8 @@ int Cache::UnlinkFile(const std::string& f_name, bool fail_if_open)
 
    {
       XrdSysCondVarHelper lock(&m_active_cond);
-
       m_active.erase(it);
+      m_active_cond.Broadcast();
    }
 
    return std::min(f_ret, i_ret);

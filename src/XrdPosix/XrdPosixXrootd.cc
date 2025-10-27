@@ -93,7 +93,7 @@ XrdSysTrace      Trace("Posix", 0,
                       (getenv("XRDPOSIX_DEBUG") ? TRACE_Debug : 0));
 int              ddInterval= 30;
 int              ddMaxTries= 180/30;
-XrdCl::DirListFlags::Flags dlFlag = XrdCl::DirListFlags::None;
+XrdCl::DirListFlags::Flags dlFlag = XrdCl::DirListFlags::Stat;
 bool             oidsOK    = false;
 bool             p2lSRC    = false;
 bool             p2lSGI    = false;
@@ -571,7 +571,7 @@ int XrdPosixXrootd::Open(const char *path, int oflags, mode_t mode,
 
 // Translate R/W and R/O flags
 //
-   if (oflags & (O_WRONLY | O_RDWR))
+   if ((oflags & O_ACCMODE) != O_RDONLY)
       {Opts    = XrdPosixFile::isUpdt;
        XOflags = XrdCl::OpenFlags::Update;
       } else {
@@ -1240,9 +1240,28 @@ int XrdPosixXrootd::Statfs(const char *path, struct statfs *buf)
 }
 
 /******************************************************************************/
+/*                               S t a t R e t                                */
+/******************************************************************************/
+
+int XrdPosixXrootd::StatRet(DIR *dirp, struct stat *buf)
+{
+// Find the object
+//
+   auto fildes = XrdPosixDir::dirNo(dirp);
+   auto dP = XrdPosixObject::Dir(fildes);
+   if (!dP) return EBADF;
+
+// Get the stat info
+   auto rc = dP->StatRet(buf);
+
+   dP->UnLock();
+   return rc;
+}
+
+/******************************************************************************/
 /*                               S t a t v f s                                */
 /******************************************************************************/
-  
+
 int XrdPosixXrootd::Statvfs(const char *path, struct statvfs *buf)
 {
    static const int szVFS = sizeof(buf->f_bfree);
@@ -1488,18 +1507,20 @@ int XrdPosixXrootd::QueryChksum(const char *path,  time_t &Mtime,
 int XrdPosixXrootd::QueryError(std::string& emsg, int fd, bool reset)
 {
    XrdOucECMsg* ecmP;
+   XrdPosixFile* fp = 0;
 
 // If global wanted then use that one otherwise find the object specific one
 //
    if (fd < 0) ecmP = &XrdPosixGlobals::ecMsg;
-       else {XrdPosixFile *fp;
-             if (!(fp = XrdPosixObject::File(fd))) return -1;
+       else {if (!(fp = XrdPosixObject::File(fd))) return -1;
              ecmP = fp->getECMsg();
             }
 
 // Return the message information
 //
-   return ecmP->Get(emsg, reset);
+   const int rc = ecmP->Get(emsg, reset);
+   if (fp) fp->UnLock();
+   return rc;
 }
   
 /******************************************************************************/
@@ -1580,7 +1601,7 @@ int XrdPosixXrootd::EcRename(const char *oldpath, const char *newpath,
     else
         if (queryResp) delete queryResp;
 
-    st = fs.DeepLocate("*", XrdCl::OpenFlags::None, info );
+    st = fs.DeepLocate("*", XrdCl::OpenFlags::PrefName, info );
     std::unique_ptr<XrdCl::LocationInfo> ptr( info );
     if( !st.IsOK() ) 
       return XrdPosixMap::Result(st, XrdPosixGlobals::ecMsg, true);
@@ -1656,7 +1677,7 @@ int XrdPosixXrootd::EcStat(const char *path, struct stat *buf,
    else
        if (queryResp) delete queryResp;
 
-   st = fs.DeepLocate("*", XrdCl::OpenFlags::None, info );
+   st = fs.DeepLocate("*", XrdCl::OpenFlags::PrefName, info );
    std::unique_ptr<XrdCl::LocationInfo> ptr( info );
    if( !st.IsOK() ) 
    {
@@ -1743,7 +1764,7 @@ int XrdPosixXrootd::EcUnlink(const char *path, XrdPosixAdmin &admin)
     else
         if (queryResp) delete queryResp;
 
-    st = fs.DeepLocate("*", XrdCl::OpenFlags::None, info );
+    st = fs.DeepLocate("*", XrdCl::OpenFlags::PrefName, info );
     std::unique_ptr<XrdCl::LocationInfo> ptr( info );
     if( !st.IsOK() ) 
       return XrdPosixMap::Result(st, admin.ecMsg, true);
