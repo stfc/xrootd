@@ -4,6 +4,8 @@
 #include "XrdHttp/XrdHttpProtocol.hh"
 #include "XrdHttp/XrdHttpChecksumHandler.hh"
 #include "XrdHttp/XrdHttpReadRangeHandler.hh"
+#include "XrdHttp/XrdHttpHeaderUtils.hh"
+#include "XrdHttpCors/XrdHttpCorsHandler.hh"
 #include <exception>
 #include <gtest/gtest.h>
 #include <string>
@@ -606,4 +608,46 @@ TEST(XrdHttpTests,encodeOpaqueTest) {
   for(auto [decoded,encoded]: decodedEncodedOpaque) {
     ASSERT_EQ(encoded,encode_opaque(decoded));
   }
+}
+
+static inline const std::pair<std::string, std::map<std::string,std::string>> reprDigest[] {
+  {"", {}},
+  {"adler=:test:",{{"adler","test"}}},
+  {"adler=:RXJyb3IK=:",{{"adler","RXJyb3IK="}}},
+  {"adler=:test:, sha256=:sha256value:",{{"adler","test"},{"sha256","sha256value"}}},
+  {"adler=",{}},
+  {"adler=,sha256=:sha256value:",{{"sha256","sha256value"}}},
+  {"azerty",{}},
+  {"adler=:abc:def:",{{"adler","abc:def"}}},
+  {"adler=::abc:",{{"adler",":abc"}}},
+  {"=::value:",{}}
+};
+
+TEST(XrdHttpTests, parseReprDigest) {
+  for(const auto & [input, expectedMap]: reprDigest) {
+    std::map<std::string,std::string> output;
+    XrdHttpHeaderUtils::parseReprDigest(input,output);
+    ASSERT_EQ(expectedMap, output);
+  }
+}
+
+TEST(XrdHttpTests, getCORSAllowOriginHeader) {
+  std::unordered_set<std::string> allowedOrigins = {
+    "https://helloworld.cern.ch",
+    "https://anotherorigins.cern.ch"
+  };
+  XrdHttpCorsHandler corsHandler;
+  for(const auto & allowedOrigin: allowedOrigins) {
+    corsHandler.addAllowedOrigin(allowedOrigin);
+  }
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader("test"));
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(""));
+  for(const auto & allowedOrigin: allowedOrigins) {
+    std::string expected {"Access-Control-Allow-Origin: " + allowedOrigin};
+    ASSERT_EQ(expected,corsHandler.getCORSAllowOriginHeader(allowedOrigin));
+  }
+  corsHandler.addAllowedOrigin("");
+  corsHandler.addAllowedOrigin(" ");
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(""));
+  ASSERT_EQ(std::nullopt,corsHandler.getCORSAllowOriginHeader(" "));
 }

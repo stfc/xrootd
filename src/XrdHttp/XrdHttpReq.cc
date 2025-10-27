@@ -57,6 +57,7 @@
 #include "XrdOuc/XrdOucTUtils.hh"
 #include "XrdOuc/XrdOucUtils.hh"
 #include "XrdOuc/XrdOucPrivateUtils.hh"
+#include "XrdHttp/XrdHttpHeaderUtils.hh"
 
 #include "XrdHttpUtils.hh"
 
@@ -206,6 +207,9 @@ int XrdHttpReq::parseLine(char *line, int len) {
     } else if (!strcasecmp(key, "user-agent")) {
       m_user_agent = val;
       trim(m_user_agent);
+    } else if (!strcasecmp(key,"origin")) {
+      m_origin = val;
+      trim(m_origin);
     } else {
       // Some headers need to be translated into "local" cgi info.
       auto it = std::find_if(prot->hdr2cgimap.begin(), prot->hdr2cgimap.end(),[key](const auto & item) {
@@ -984,11 +988,6 @@ int XrdHttpReq::ProcessHTTPReq() {
         << header2cgistrObf.c_str() << "'");
 
     }
-    // We assume that anything appended to the CGI str should also
-    // apply to the destination in case of a MOVE.
-    if (strchr(destination.c_str(), '?')) destination.append("&");
-    else destination.append("?");
-    destination.append(hdr2cgistrEncoded.c_str());
 
     m_appended_hdr2cgistr = true;
     }
@@ -1143,7 +1142,7 @@ int XrdHttpReq::ProcessHTTPReq() {
           l = resourceplusopaque.length() + 1;
           xrdreq.open.dlen = htonl(l);
           xrdreq.open.mode = 0;
-          xrdreq.open.options = htons(kXR_retstat | kXR_open_read);
+          xrdreq.open.options = htons(kXR_retstat | kXR_open_read | ((readRangeHandler.getMaxRanges() <= 1) ? kXR_seqio : 0));
 
           if (!prot->Bridge->Run((char *) &xrdreq, (char *) resourceplusopaque.c_str(), l)) {
             prot->SendSimpleResp(404, NULL, NULL, (char *) "Could not run request.", 0, false);
@@ -1728,6 +1727,15 @@ int XrdHttpReq::ProcessHTTPReq() {
     }
     case XrdHttpReq::rtMOVE:
     {
+      // Incase of a move cgi parameters present in the CGI str
+      // are appended to the destination in case of a MOVE.
+      if (resourceplusopaque != "") {
+        int pos = resourceplusopaque.find("?");
+        if (pos != STR_NPOS) {
+          destination.append((destination.find("?") == std::string::npos) ? "?" : "&");
+          destination.append(resourceplusopaque.c_str() + pos + 1);
+        }
+      }
 
       // --------- MOVE
       memset(&xrdreq, 0, sizeof (ClientRequest));
@@ -2850,6 +2858,7 @@ void XrdHttpReq::reset() {
 
   m_resource_with_digest = "";
   m_user_agent = "";
+  m_origin = "";
 
   headerok = false;
   keepalive = true;
