@@ -8,11 +8,11 @@
 #include <XrdOuc/XrdOucEnv.hh>
 
 // Declare prototypes for functions we test from XrdCephPosix.cc
-extern "C" char *ts_rfc3339();
-extern "C" const char* formatAdler32(unsigned long adler32);
-extern "C" char *hexbytes2ascii(const char bytes[], const unsigned int length);
-extern unsigned int getCephPoolIdxAndIncrease();
-extern unsigned int g_maxCephPoolIdx;
+//extern "C" char *ts_rfc3339();
+//extern "C" const char* formatAdler32(unsigned long adler32);
+//extern "C" char *hexbytes2ascii(const char bytes[], const unsigned int length);
+//extern unsigned int getCephPoolIdxAndIncrease();
+//extern unsigned int g_maxCephPoolIdx;
 
 TEST(XrdCephPosix_ParseTests, TsRfc3339_NotNullAndFormat) {
     char* ts = ts_rfc3339();
