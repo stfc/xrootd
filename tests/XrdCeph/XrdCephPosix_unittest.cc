@@ -4,6 +4,9 @@
 #include <cstring>
 #include <arpa/inet.h>
 
+#include <XrdCeph/XrdCephPosix.hh>
+#include <XrdOuc/XrdOucEnv.hh>
+
 // Declare prototypes for functions we test from XrdCephPosix.cc
 extern "C" char *ts_rfc3339();
 extern "C" const char* formatAdler32(unsigned long adler32);
