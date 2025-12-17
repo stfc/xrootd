@@ -860,8 +860,9 @@ int ceph_posix_close(int fd) {
   	  logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks.c_str());
 
       if (g_logStreamedAdler32) {
-	      const char *path = (fr->pool + ":" + fr->name).c_str();
-        fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339().c_str(), path, "streamed", "adler32", adler32Cks.c_str());
+        std::string path = fr->pool + ":" + fr->name;
+        std::string ts = ts_rfc3339();
+        fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts.c_str(), path.c_str(), "streamed", "adler32", adler32Cks.c_str());
         fflush(g_cksLogFile);
       }
 
