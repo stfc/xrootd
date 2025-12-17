@@ -87,11 +87,11 @@ std::string hexbytes2ascii(const char bytes[], const unsigned int length){
 
 using namespace std;
 
-int setXrdCksAttr(const int fd, const char* cstype, const char* ckSumbuf) {
+int setXrdCksAttr(const int fd, const char* cstype, std::string ckSumbuf) {
 
       int rc = -1;
 
-      std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf, time(0));
+      std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf.c_str(), time(0));
 
       rc = ceph_posix_fsetxattr(fd, XrdCksAttrName(cstype).c_str(),
       attrData.data(), attrData.size(), 0);
@@ -868,7 +868,7 @@ int ceph_posix_close(int fd) {
         }
 
         if (g_storeStreamedAdler32) {
-          int rc = setXrdCksAttr(fd, "adler32", adler32Cks.c_str()); 
+          int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
           if (rc != 0) {
             logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
           }
