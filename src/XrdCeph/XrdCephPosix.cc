@@ -853,26 +853,32 @@ int ceph_posix_close(int fd) {
 
     if (fr->writingData && g_calcStreamedAdler32) {
 
-	    unsigned long adlerULong;
-	    memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
-	    std::string adler32Cks = formatAdler32(adlerULong);
+      if (fr->cksCalcadler32) {
+        unsigned long adlerULong;
+        memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
+        std::string adler32Cks = formatAdler32(adlerULong);
 
-  	  logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks.c_str());
+        logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks.c_str());
 
-      if (g_logStreamedAdler32) {
-        std::string path = fr->pool + ":" + fr->name;
-        std::string ts = ts_rfc3339();
-        fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts.c_str(), path.c_str(), "streamed", "adler32", adler32Cks.c_str());
-        fflush(g_cksLogFile);
+        if (g_logStreamedAdler32) {
+          std::string path = fr->pool + ":" + fr->name;
+          std::string ts = ts_rfc3339();
+          fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts.c_str(), path.c_str(), "streamed", "adler32", adler32Cks.c_str());
+          fflush(g_cksLogFile);
+        }
+
+        if (g_storeStreamedAdler32) {
+          int rc = setXrdCksAttr(fd, "adler32", adler32Cks.c_str()); 
+          if (rc != 0) {
+            logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
+          }
+        }
+        delete fr->cksCalcadler32;
+        fr->cksCalcadler32 = nullptr;
+      } else {
+        // No checksum object present; log this unexpected condition
+        logwrapper((char*)"ceph_close: fd %d expected streamed checksum object but found none", fd);
       }
-
-      if (g_storeStreamedAdler32) {
-        int rc = setXrdCksAttr(fd, "adler32", adler32Cks.c_str()); 
-        if (rc != 0) {
-          logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
-         }
-      }
-      delete fr->cksCalcadler32;
     }
 
     deleteFileRef(fd, *fr);
