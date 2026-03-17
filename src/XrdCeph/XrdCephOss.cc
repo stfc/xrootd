@@ -168,10 +168,10 @@ XrdCephOss::~XrdCephOss() {
 extern unsigned int g_maxCephPoolIdx;
 extern unsigned int g_cephAioWaitThresh;
 
-bool g_calcStreamedAdler32;
-bool g_storeStreamedAdler32;
-bool g_logStreamedAdler32;
-
+extern bool g_calcStreamedAdler32;
+extern bool g_storeStreamedAdler32;
+extern bool g_logStreamedAdler32;
+extern double g_ECcorrectionFactor; // correction factor to apply to used space when EC pools are used, to get a better estimate of actual used space
 
 
 int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
@@ -372,7 +372,26 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            Eroute.Emsg("Config", "Missing value for ceph.reportingpools in config file", configfn);
            return 1;
          }
+         // EC correction factor for pool reporting
+         if (!strncmp(var, "ceph.ECcorrectionFactor", 23)) { // size in bytes
+           var = Config.GetWord();
+           if (var) {
+             double value = strtod(var, 0);
+             if (value > 0 and value <= 1) {
+               g_ECcorrectionFactor = value;
+               Eroute.Emsg("Config", "ceph.ECcorrectionFactor", std::to_string(g_ECcorrectionFactor).c_str() ); 
+             } else {
+               Eroute.Emsg("Config", "Invalid value for ceph.ECcorrectionFactor in config file; enter a value between 0 and 1", configfn, var);
+               return 1;
+             }
+         } else {
+           Eroute.Emsg("Config", "Missing value for ceph.ECcorrectionFactor in config file. Setting default 8/11", configfn);
+	   g_ECcorrectionFactor = 0.727272; // default 8/11 EC correction factor
+           return 1;
+           }
+         }
        }
+
        if (!strcmp(var, "ceph.streamed-cks-adler32")) { // Streaming Adler32 checksum
 
          var = Config.GetWord();
@@ -674,20 +693,16 @@ int XrdCephOss::StatLS(XrdOucEnv &env, const char *charPath, char *buff, int &bl
       XrdCephEroute.Say("Failed to get used space in pool ", spath.c_str());
       return -EINVAL;
   }
-
   // Construct the object path
   std::string spaceInfoPath =  spath + ":" +  (const char *)"__spaceinfo__";
   totalSpace = getNumericAttr(spaceInfoPath.c_str(), "total_space", 24);
   if (totalSpace < 0) {
     XrdCephEroute.Say("Could not get 'total_space' attribute from ", spaceInfoPath.c_str());
     return -EINVAL;
-  }
-
+  }  
 //
 // Figure for 'usedSpace' already accounts for Erasure Coding overhead
 //
-
-
   freeSpace = totalSpace - usedSpace;
   blen = formatStatLSResponse(buff, blen, 
     spath.c_str(),       /* "oss.cgroup" */ 
@@ -746,4 +761,5 @@ XrdOssDF* XrdCephOss::newFile(const char *tident) {
 
   return xrdCephOssDF;
 }
+
 
