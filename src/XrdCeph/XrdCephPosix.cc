@@ -156,12 +156,10 @@ XrdSysMutex g_logAdler32;
 std::map<unsigned int, unsigned long long> g_idxCntr;
 
 //IJJ: Actions for Adler32 checksum
-extern bool g_calcStreamedAdler32;
-bool g_calcStreamedAdler32 = false;
-extern bool g_logStreamedAdler32;
-bool g_logStreamedAdler32 = false;
-extern bool g_storeStreamedAdler32; 
-bool g_storeStreamedAdler32 = false;
+bool g_calcStreamedAdler32;
+bool g_logStreamedAdler32;
+bool g_storeStreamedAdler32; 
+double g_ECcorrectionFactor; 
 
 FILE *g_cksLogFile;
 
@@ -1638,7 +1636,7 @@ int ceph_posix_stat_pool(char const *poolName, long long *usedSpace) {
 
   } else {
  
-    *usedSpace = stat[poolName].num_kb * 1024;
+    *usedSpace = stat[poolName].num_kb * 1024 * g_ECcorrectionFactor; // num_kb is in KB, convert to bytes and apply EC correction factor
     return XrdOssOK;
 
   }
@@ -1756,3 +1754,4 @@ int ceph_posix_closedir(DIR *dirp) {
   delete ((DirIterator*)dirp);
   return 0;
 }
+
