@@ -14,7 +14,6 @@ Build-Depends:
  libfuse-dev [linux-any kfreebsd-any],
  libkrb5-dev,
  libcurl4-openssl-dev,
- libtinyxml-dev,
  libxml2-dev,
  libzip-dev,
  ncurses-dev,
@@ -32,8 +31,6 @@ Build-Depends:
  uuid-runtime,
  voms-dev,
  libscitokens-dev,
- davix,
- davix-dev,
  librados-dev [amd64 arm64 mips64el ppc64el riscv64 s390x],
  libradospp-dev [amd64 arm64 mips64el ppc64el riscv64 s390x],
  libradosstriper-dev [amd64 arm64 mips64el ppc64el riscv64 s390x],
@@ -44,7 +41,8 @@ Build-Depends:
  krb5-pkinit,
  krb5-user,
  openssl,
- procps
+ procps,
+ sqlite3
 Build-Depends-Indep:
  dh-sequence-sphinxdoc,
  doxygen,
@@ -201,19 +199,6 @@ Recommends:
 Description: Client library for xrootd
  This package contains the xrootd client library.
 
-Package: libxrdec1t64
-Provides: ${t64:Provides}
-Replaces: libxrdec1
-Breaks: libxrdec1 (<< ${source:Version})
-Architecture: any
-Multi-Arch: same
-Section: libs
-Depends:
- ${shlibs:Depends},
- ${misc:Depends}
-Description: Erasure code library for xrootd
- This package contains the xrootd erasure code library.
-
 Package: libxrdffs3t64
 Provides: ${t64:Provides}
 Replaces: libxrdffs3
@@ -359,7 +344,6 @@ Architecture: any
 Multi-Arch: same
 Section: libdevel
 Depends:
- libxrdec1t64 (= ${binary:Version}) [!i386 !hppa !hurd-i386 !powerpc !x32],
  libxrdssilib2t64 (= ${binary:Version}),
  libxrdssishmap2t64 (= ${binary:Version}),
  libxrootd-dev (= ${binary:Version}),

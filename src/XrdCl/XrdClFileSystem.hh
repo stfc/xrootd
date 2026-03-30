@@ -39,6 +39,7 @@ namespace XrdCl
 {
   class PostMaster;
   class FileSystemPlugIn;
+  class File;
   struct MessageSendParams;
 
   //----------------------------------------------------------------------------
@@ -56,11 +57,14 @@ namespace XrdCl
       Checksum       = kXR_Qcksum,     //!< Query file checksum
       Opaque         = kXR_Qopaque,    //!< Implementation dependent
       OpaqueFile     = kXR_Qopaquf,    //!< Implementation dependent
+      OpaqueQ        = kXR_Qopaqug,    //!< Implementation dependent
       Prepare        = kXR_QPrep,      //!< Query prepare status
       Space          = kXR_Qspace,     //!< Query logical space stats
       Stats          = kXR_QStats,     //!< Query server stats
       Visa           = kXR_Qvisa,      //!< Query file visa attributes
-      XAttr          = kXR_Qxattr      //!< Query file extended attributes
+      XAttr          = kXR_Qxattr,     //!< Query file extended attributes
+      FInfo          = kXR_QFinfo,     //!< Query op-dependant file information on FD
+      FSInfo         = kXR_QFSinfo     //!< Query op-dependant file information on FS path
     };
   };
 
@@ -104,8 +108,10 @@ namespace XrdCl
       SeqIO    = kXR_seqio,         //!< File will be read or written sequentially
       PrefName = kXR_prefname,      //!< Hostname response is prefered, applies
                                     //!< only to FileSystem::Locate
-      IntentDirList = kXR_4dirlist  //!< Make sure the server knows we are doing
+      IntentDirList = kXR_4dirlist, //!< Make sure the server knows we are doing
                                     //!< locate in context of a dir list operation
+      Dup      = kXR_dup<<16,       //!< Open file duplicating content from another
+      Samefs   = kXR_samefs<<16     //!< Open file on the same filesystem as another
     };
   };
   XRDOUC_ENUM_OPERATORS( OpenFlags::Flags )

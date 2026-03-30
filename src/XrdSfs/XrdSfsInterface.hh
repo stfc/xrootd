@@ -4,7 +4,7 @@
 /*                                                                            */
 /*                    X r d S f s I n t e r f a c e . h h                     */
 /*                                                                            */
-/* (c) 2018 by the Board of Trustees of the Leland Stanford, Jr., University  */
+/* (c) 2026 by the Board of Trustees of the Leland Stanford, Jr., University  */
 /*   Produced by Andrew Hanushevsky for Stanford University under contract    */
 /*              DE-AC02-76-SFO0515 with the Department of Energy              */
 /*                                                                            */
@@ -32,12 +32,14 @@
 #include <cstring>      // For strlcpy()
 #include <cerrno>
 #include <cstdint>
+#include <string>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <vector>
 
 #include "XrdOuc/XrdOucErrInfo.hh"
 #include "XrdOuc/XrdOucIOVec.hh"
-#include "XrdOuc/XrdOucSFVec.hh"
+#include "XrdOuc/XrdOucRange.hh"
 
 #include "XrdSfs/XrdSfsGPFile.hh"
 
@@ -54,6 +56,7 @@
 #define SFS_O_TRUNC   0x00000200         // used for file truncation
 #define SFS_O_MULTIW  0x00000400         // used for multi-write locations
 #define SFS_O_NOTPC   0x00000800         // used to suppress TPC opens
+#define SFS_O_CREATAT 0x00001100         // used for file creation at FS
 #define SFS_O_DIRLIST 0x00010000         // used for locate only
 #define SFS_O_POSC    0x00100000         // persist on successful close
 #define SFS_O_FORCE   0x00200000         // used for locate only
@@ -85,7 +88,8 @@
 //
 #define SFS_FCTL_GETFD    1 // Return file descriptor if possible
 #define SFS_FCTL_STATV    2 // Return visa information
-#define SFS_FCTL_SPEC1    3 // Return implementation defined information
+#define SFS_FCTL_SPEC1    3 // Return implementation defined information V1
+#define SFS_FCTL_QFINFO   4 // Return implementation defined file info
 
 #define SFS_SFIO_FDVAL 0x80000000 // Use SendData() method GETFD response value
 
@@ -98,6 +102,7 @@
 #define SFS_FSCTL_STATLS  3 // Return LS data
 #define SFS_FSCTL_STATXA  4 // Return XA data
 #define SFS_FSCTL_STATCC  5 // Return Cluster Config status
+#define SFS_FSCTL_PLUGFS  7 // Perform filesystem oriented operation
 #define SFS_FSCTL_PLUGIN  8 // Return Implementation Dependent Data
 #define SFS_FSCTL_PLUGIO 16 // Return Implementation Dependent Data
 #define SFS_FSCTL_PLUGXC 32 // Perform cache oriented operation
@@ -130,7 +135,7 @@ typedef int           XrdSfsFileOpenMode;
 typedef int           XrdSfsMode;
 typedef int           XrdSfsXferSize;
 
-enum XrdSfsFileExistence 
+enum XrdSfsFileExistence
 {
      XrdSfsFileExistNo,
      XrdSfsFileExistIsFile,
@@ -158,13 +163,13 @@ enum XrdSfsFileExistence
 
 class XrdOucTList;
 
-struct XrdSfsFSctl //!< SFS_FSCTL_PLUGIN/PLUGIO/PLUGXC parms
+struct XrdSfsFSctl //!< SFS_FSCTL_PLUGIN/PLUGIO/PLUGXC/PLUGFS parms
 {
- const char            *Arg1;      //!< PLUGINO, PLUGION, PLUGXC
+ const char            *Arg1;      //!< PLUGFS, PLUGIN, PLUGIO, PLUGXC
        int              Arg1Len;   //!< Length
        int              Arg2Len;   //!< Length  or -count of args in extension
  union{
- const char            *Arg2;      //!< PLUGIN  opaque string
+ const char            *Arg2;      //!< PLUGFS, PLUGIN  opaque string
  const char           **ArgP;      //!< PLUGXC  argument list extension
       };
 };
@@ -183,6 +188,7 @@ struct XrdSfsPrep  //!< Prepare parameters
 /******************************************************************************/
 
 class  XrdOucEnv;
+struct XrdOucCloneSeg;
 class  XrdSecEntity;
 struct XrdSfsFACtl;
 
@@ -239,7 +245,7 @@ struct XrdSfsFACtl;
 //! The XrdSfsDirectory object is returned by XrdSfsFileSystem::newFile() when
 //! the caller wants to be able to perform directory oriented operations.
 //------------------------------------------------------------------------------
-  
+
 class XrdSfsDirectory
 {
 public:
@@ -365,7 +371,7 @@ XrdOucErrInfo* lclEI;
 class XrdSfsAio;
 class XrdSfsDio;
 class XrdSfsXio;
-  
+
 class XrdSfsFile
 {
 public:
@@ -383,6 +389,7 @@ public:
 //! @param  fileName   - Pointer to the path of the file to be opened.
 //! @param  openMode   - Flags indicating how the open is to be handled.
 //!                      SFS_O_CREAT   create the file
+//!                      SFS_O_CREATAT create the file in a perticular FS
 //!                      SFS_O_MKPTH   Make directory path if missing
 //!                      SFS_O_NOWAIT  do not impose operational delays
 //!                      SFS_O_NOTPC   do not allow TPC operation
@@ -399,6 +406,10 @@ public:
 //! @param  opaque     - path's CGI information (see common description).
 //!
 //! @return One of SFS_OK, SFS_ERROR, SFS_REDIRECT, SFS_STALL, or SFS_STARTED
+//!
+//! @note When SFS_O_CREATAT is specified, the CGI should contain an element
+//!       oss.coloc=<path> where <path> is URL encoded and determines the
+//!       filesystem in which the new file should be created.
 //-----------------------------------------------------------------------------
 
 virtual int            open(const char                *fileName,
@@ -441,6 +452,26 @@ enum cpAct {cpCreate=0,   //!< Create a checkpoint, one must not be active.
 virtual int            checkpoint(cpAct act, struct iov *range=0, int n=0);
 
 //-----------------------------------------------------------------------------
+//! Clone contents of a file from another file.
+//!
+//! @param  srcFile - Reference to the file to used to clone contents of this file,
+//!
+//! @return One of SFS_OK or SFS_ERROR.
+//-----------------------------------------------------------------------------
+
+virtual int            Clone(XrdSfsFile& srcFile);
+
+//-----------------------------------------------------------------------------
+//! Clone contents of a file from one or more other files.
+//!
+//! @param  cVec  - A vector of struct XrdOucCloneSeg describing the action.
+//!
+//! @return One of SFS_OK or SFS_ERROR.
+//-----------------------------------------------------------------------------
+
+virtual int            Clone(const std::vector<XrdOucCloneSeg> &cVec);
+
+//-----------------------------------------------------------------------------
 //! Close the file.
 //!
 //! @return One of SFS_OK or SFS_ERROR.
@@ -475,7 +506,8 @@ virtual int            fctl(const int               cmd,
 //! Execute a special operation on the file (version 2)
 //!
 //! @param  cmd    - The operation to be performed:
-//!                  SFS_FCTL_SPEC1    Perform implementation defined action
+//!                  SFS_FCTL_SPEC1    Perform implementation defined action V1
+//!                  SFS_FCTL_SPEC2    Perform implementation defined action V2
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  client - Client's identify (see common description).
@@ -597,17 +629,28 @@ virtual XrdSfsXferSize pgWrite(XrdSfsFileOffset   offset,
 virtual int            pgWrite(XrdSfsAio *aioparm, uint64_t opts=0);
 
 //-----------------------------------------------------------------------------
-//! Preread file blocks into the file system cache.
+//! Preread a file block into the file system cache.
 //!
 //! @param  offset  - The offset where the read is to start.
 //! @param  size    - The number of bytes to pre-read.
 //!
-//! @return >= 0      The number of bytes that will be pre-read.
+//! @return >= 0      When 0, the request was ignored; otherwise, it has been accepted.
 //! @return SFS_ERROR File could not be preread, error holds the reason.
 //-----------------------------------------------------------------------------
 
 virtual XrdSfsXferSize read(XrdSfsFileOffset   offset,
                             XrdSfsXferSize     size) = 0;
+
+//-----------------------------------------------------------------------------
+//! Preread a list of file blocks into the file system cache.
+//!
+//! @param  rlist   - A list of byte ranges to pre-read.
+//!
+//! @return >= 0      When 0, the request was ignored; otherwise, it has been accepted.
+//! @return SFS_ERROR File could not be preread, error holds the reason.
+//-----------------------------------------------------------------------------
+
+virtual XrdSfsXferSize read(XrdOucRangeList& rlist);
 
 //-----------------------------------------------------------------------------
 //! Read file bytes into a buffer.
@@ -815,7 +858,7 @@ XrdSfsFileOffset pgwrEOF;
 /******************************************************************************/
 /*                      X r d S f s F i l e S y s t e m                       */
 /******************************************************************************/
-  
+
 //-----------------------------------------------------------------------------
 //! Common parameters: Many of the methods have certain common parameters.
 //! These are documented here to avoid lengthy duplicate descriptions.
@@ -1037,11 +1080,14 @@ virtual int            FAttr(      XrdSfsFACtl      *faReq,
 //! Perform a filesystem control operation (version 2)
 //!
 //! @param  cmd    - The operation to be performed:
+//!                  SFS_FSCTL_PLUGFS  Return Implementation Dependent Data FS
 //!                  SFS_FSCTL_PLUGIN  Return Implementation Dependent Data v1
 //!                  SFS_FSCTL_PLUGIO  Return Implementation Dependent Data v2
+//!                  SFS_FSCTL_PLUGXC  Return Implementation Dependent Cache
 //! @param  args   - Arguments specific to cmd.
+//!                  SFS_FSCTL_PLUGFS  Unscreened argument string.
 //!                  SFS_FSCTL_PLUGIN  path and opaque information.
-//!                  SFS_FSCTL_PLUGIO  Unscreened argument string.
+//!                  SFS_FSCTL_PLUGXC  Unscreened argument string.
 //! @param  eInfo  - The object where error info or results are to be returned.
 //! @param  client - Client's identify (see common description).
 //!

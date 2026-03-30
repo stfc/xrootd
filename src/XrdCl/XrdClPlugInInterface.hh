@@ -56,6 +56,20 @@ namespace XrdCl
       }
 
       //------------------------------------------------------------------------
+      //! @see XrdCl::File::OpenUsingTemplate
+      //------------------------------------------------------------------------
+      virtual XRootDStatus OpenUsingTemplate( ExportedFileTemplate *templ,
+                                              const std::string &url,
+                                              OpenFlags::Flags   flags,
+                                              Access::Mode       mode,
+                                              ResponseHandler   *handler,
+                                              time_t             timeout )
+      {
+        (void)templ; (void)url; (void)flags; (void)mode; (void)handler; (void)timeout;
+        return XRootDStatus( stError, errNotImplemented );
+      }
+
+      //------------------------------------------------------------------------
       //! @see XrdCl::File::Close
       //------------------------------------------------------------------------
       virtual XRootDStatus Close( ResponseHandler *handler,
@@ -191,6 +205,18 @@ namespace XrdCl
       }
 
       //------------------------------------------------------------------------
+      //! @see XrdCl::File::PreRead
+      //------------------------------------------------------------------------
+      virtual XRootDStatus PreRead( const TractList &tracts,
+                                    ResponseHandler *handler,
+                                    time_t           timeout )
+      {
+        (void)tracts; (void)handler; (void)timeout;
+        return XRootDStatus();
+      }
+
+
+      //------------------------------------------------------------------------
       //! @see XrdCl::File::VectorRead
       //------------------------------------------------------------------------
       virtual XRootDStatus VectorRead( const ChunkList &chunks,
@@ -239,6 +265,18 @@ namespace XrdCl
       }
 
       //------------------------------------------------------------------------
+      //! @see XrdCl::File::Fcntl
+      //------------------------------------------------------------------------
+      virtual XRootDStatus Fcntl( QueryCode::Code  queryCode,
+                                  const Buffer    &arg,
+                                  ResponseHandler *handler,
+                                  time_t           timeout )
+      {
+        (void)arg; (void)handler; (void)timeout;
+        return XRootDStatus( stError, errNotImplemented );
+      }
+
+      //------------------------------------------------------------------------
       //! @see XrdCl::File::Visa
       //------------------------------------------------------------------------
       virtual XRootDStatus Visa( ResponseHandler *handler,
@@ -274,6 +312,30 @@ namespace XrdCl
       {
         (void)name; (void)value;
         return false;
+      }
+
+      //------------------------------------------------------------------------
+      //! Obtains an object that contains information regarding the file.
+      //! Another instance of the plugin can use the object via
+      //! OpenUsingTemplate or Clone. The returned object should be of a
+      //! class derived from ExportedFileTemplate, the exact type of which could
+      //! be used to ensure the source plugin is the same the destination. In
+      //! the case of Clone() it should be considered that the source file
+      //! object may have been destroyed by the time Clone() uses the template
+      //! and a suitable action should happen, such as returning an error.
+      //------------------------------------------------------------------------
+      virtual std::unique_ptr<ExportedFileTemplate> ExportTemplate() const
+      {
+        return {};
+      }
+
+      //------------------------------------------------------------------------
+      //! @see XrdCl::File::Clone
+      //------------------------------------------------------------------------
+      virtual XRootDStatus Clone( const CloneLocations &locs, ResponseHandler *handler, time_t timeout )
+      {
+        (void)locs; (void)handler, (void)timeout;
+        return XRootDStatus( stError, errNotImplemented );
       }
   };
 

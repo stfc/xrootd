@@ -74,6 +74,15 @@ namespace XrdCl
   }
 
   //----------------------------------------------------------------------------
+  // Constructor
+  //----------------------------------------------------------------------------
+  File::File(const std::string &url, bool enablePlugIns): pPlugIn(0), pEnablePlugIns(enablePlugIns)
+  {
+    InitPlugin(url);
+    pImpl = new FileImpl(pPlugIn);
+  }
+
+  //----------------------------------------------------------------------------
   // Destructor
   //----------------------------------------------------------------------------
   File::~File()
@@ -93,6 +102,23 @@ namespace XrdCl
     delete pPlugIn;
   }
 
+  void File::InitPlugin(const std::string &url) {
+
+    if (pEnablePlugIns && !pPlugIn) {
+      Log *log = DefaultEnv::GetLog();
+      PlugInFactory *fact = DefaultEnv::GetPlugInManager()->GetFactory(url);
+      if (fact) {
+        pPlugIn = fact->CreateFile(url);
+        if (!pPlugIn) {
+          log->Error(FileMsg,
+                     "Plug-in factory failed to produce a plug-in "
+                     "for %s, continuing without one",
+                     url.c_str());
+        }
+      }
+    }
+  }
+
   //----------------------------------------------------------------------------
   // Open the file pointed to by the given URL - async
   //----------------------------------------------------------------------------
@@ -102,23 +128,12 @@ namespace XrdCl
                            ResponseHandler   *handler,
                            time_t             timeout )
   {
-    //--------------------------------------------------------------------------
     // Check if we need to install and run a plug-in for this URL
-    //--------------------------------------------------------------------------
-    if( pEnablePlugIns && !pPlugIn )
-    {
-      Log *log = DefaultEnv::GetLog();
-      PlugInFactory *fact = DefaultEnv::GetPlugInManager()->GetFactory( url );
-      if( fact )
-      {
-        pPlugIn = fact->CreateFile( url );
-        if( !pPlugIn )
-        {
-          log->Error( FileMsg, "Plug-in factory failed to produce a plug-in "
-                      "for %s, continuing without one", url.c_str() );
-        }
-      }
-    }
+    InitPlugin(url);
+
+    if( (flags & OpenFlags::Dup) || (flags & OpenFlags::Samefs) )
+      return XRootDStatus( stError, errInvalidArgs, 0,
+             "Dup or Samefs options require a file template to be specified" );
 
     //--------------------------------------------------------------------------
     // Open the file
@@ -127,6 +142,32 @@ namespace XrdCl
       return pPlugIn->Open( url, flags, mode, handler, timeout );
 
     return FileStateHandler::Open( pImpl->pStateHandler, url, flags, mode, handler, timeout );
+  }
+
+  //----------------------------------------------------------------------------
+  // Open the file pointed to by the given URL - async
+  // Alows one to specify template file. Required if using Dup or Samefs flags.
+  //----------------------------------------------------------------------------
+  XRootDStatus File::OpenUsingTemplate( const File        &rfile,
+                                        const std::string &url,
+                                        OpenFlags::Flags   flags,
+                                        Access::Mode       mode,
+                                        ResponseHandler   *handler,
+                                        time_t             timeout )
+  {
+    // Check if we need to install and run a plug-in for this URL
+    InitPlugin(url);
+
+    //--------------------------------------------------------------------------
+    // Open the file
+    //--------------------------------------------------------------------------
+    if( pPlugIn )
+      return pPlugIn->OpenUsingTemplate( rfile.GetFileTemplate().get(), url,
+                            flags, mode, handler, timeout );
+
+    return FileStateHandler::OpenUsingTemplate( pImpl->pStateHandler,
+                                   rfile.GetFileTemplate().get(), url, flags,
+                                   mode, handler, timeout );
   }
 
   //----------------------------------------------------------------------------
@@ -139,6 +180,24 @@ namespace XrdCl
   {
     SyncResponseHandler handler;
     XRootDStatus st = Open( url, flags, mode, &handler, timeout );
+    if( !st.IsOK() )
+      return st;
+
+    return MessageUtils::WaitForStatus( &handler );
+  }
+
+  //----------------------------------------------------------------------------
+  // Open the file pointed to by the given URL - sync
+  // Alows one to specify template file. Required if using Dup or Samefs flags.
+  //----------------------------------------------------------------------------
+  XRootDStatus File::OpenUsingTemplate( const File        &rfile,
+                                        const std::string &url,
+                                        OpenFlags::Flags   flags,
+                                        Access::Mode       mode,
+                                        time_t             timeout )
+  {
+    SyncResponseHandler handler;
+    XRootDStatus st = OpenUsingTemplate( rfile, url, flags, mode, &handler, timeout );
     if( !st.IsOK() )
       return st;
 
@@ -463,6 +522,31 @@ namespace XrdCl
   }
 
   //----------------------------------------------------------------------------
+  // Preread scattered data tracts in one operation - async
+  //----------------------------------------------------------------------------
+  XRootDStatus File::PreRead( const TractList &tracts,
+                              ResponseHandler *handler,
+                              time_t           timeout )
+  {
+    if( pPlugIn )
+      return pPlugIn->PreRead( tracts, handler, timeout );
+
+//** return FileStateHandler::PreRead( pImpl->pStateHandler, tracts, handler, timeout );
+    return XRootDStatus();
+  }
+
+  //----------------------------------------------------------------------------
+  // Preread scattered data tracts in one operation - sync
+  //----------------------------------------------------------------------------
+  XRootDStatus File::PreRead( const TractList  &tracts,
+                              time_t            timeout )
+  {
+    SyncResponseHandler handler;
+    return PreRead( tracts, &handler, timeout );
+  }
+
+
+  //----------------------------------------------------------------------------
   // Read scattered data chunks in one operation - async
   //----------------------------------------------------------------------------
   XRootDStatus File::VectorRead( const ChunkList &chunks,
@@ -614,7 +698,39 @@ namespace XrdCl
     if( pPlugIn )
       return pPlugIn->Fcntl( arg, handler, timeout );
 
-    return FileStateHandler::Fcntl( pImpl->pStateHandler, arg, handler, timeout );
+    return FileStateHandler::Fcntl( pImpl->pStateHandler, QueryCode::Code::OpaqueQ, arg, handler, timeout );
+  }
+
+  //----------------------------------------------------------------------------
+  // Performs a custom operation on an open file, server implementation
+  // dependent - sync
+  //----------------------------------------------------------------------------
+  XRootDStatus File::Fcntl( QueryCode::Code   queryCode,
+                            const Buffer     &arg,
+                            Buffer          *&response,
+                            time_t            timeout )
+  {
+    SyncResponseHandler handler;
+    XRootDStatus st = Fcntl(queryCode, arg, &handler, timeout );
+    if( !st.IsOK() )
+      return st;
+
+    return MessageUtils::WaitForResponse( &handler, response );
+  }
+
+  //----------------------------------------------------------------------------
+  // Performs a custom operation on an open file, server implementation
+  // dependent - async
+  //----------------------------------------------------------------------------
+  XRootDStatus File::Fcntl( QueryCode::Code  queryCode,
+                            const Buffer    &arg,
+                            ResponseHandler *handler,
+                            time_t           timeout )
+  {
+    if( pPlugIn )
+      return pPlugIn->Fcntl( queryCode, arg, handler, timeout );
+
+    return FileStateHandler::Fcntl(pImpl->pStateHandler, queryCode, arg, handler, timeout );
   }
 
   //----------------------------------------------------------------------------
@@ -882,4 +998,40 @@ namespace XrdCl
 
     return pImpl->pStateHandler->GetProperty( name, value );
   }
+
+  //----------------------------------------------------------------------------
+  // Private method: gets the exported file template for use by open or clone
+  //----------------------------------------------------------------------------
+  std::unique_ptr<ExportedFileTemplate> File::GetFileTemplate() const
+  {
+    if( pPlugIn )
+      return pPlugIn->ExportTemplate();
+
+    return pImpl->pStateHandler->ExportTemplate( pImpl->pStateHandler );
+  }
+
+  //----------------------------------------------------------------------------
+  // Clone ranges from one or more files
+  //----------------------------------------------------------------------------
+  XRootDStatus File::Clone( const CloneLocations &locs, ResponseHandler *handler, time_t timeout )
+  {
+    if( pPlugIn )
+      return pPlugIn->Clone( locs, handler, timeout );
+
+    return pImpl->pStateHandler->Clone( pImpl->pStateHandler, locs, handler, timeout );
+  }
+
+  //----------------------------------------------------------------------------
+  // Clone ranges from one or more files
+  //----------------------------------------------------------------------------
+  XRootDStatus File::Clone( const CloneLocations &locs, time_t timeout )
+  {
+    SyncResponseHandler handler;
+    XRootDStatus st = Clone( locs, &handler, timeout );
+    if( !st.IsOK() )
+      return st;
+
+    return MessageUtils::WaitForStatus( &handler );
+  }
+
 }

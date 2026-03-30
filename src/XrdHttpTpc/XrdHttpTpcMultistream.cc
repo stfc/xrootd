@@ -258,7 +258,7 @@ int TPCHandler::RunCurlWithStreamsImpl(XrdHttpExtReq &req, State &state,
     std::vector<ManagedCurlHandle> &curl_handles, TPCLogRecord &rec)
 {
     bool success;
-    // The content-length was set thanks to the call to GetContentLengthTPCPull() before calling this function
+    // The content-length was set thanks to the call to GetRemoteFileInfoTPCPull() before calling this function
     off_t content_size = state.GetContentLength();
     off_t current_offset = 0;
 
@@ -283,7 +283,7 @@ int TPCHandler::RunCurlWithStreamsImpl(XrdHttpExtReq &req, State &state,
     curl_multi_setopt(multi_handle, CURLMOPT_MAX_HOST_CONNECTIONS, streams);
 
     // Start response to client prior to the first call to curl_multi_perform
-    int retval = req.StartChunkedResp(201, "Created", "Content-Type: text/plain");
+    int retval = req.StartChunkedResp(202, NULL, "Content-Type: text/plain");
     if (retval) {
         logTransferEvent(LogMask::Error, rec, "RESPONSE_FAIL",
             "Failed to send the initial response to the TPC client");
@@ -472,6 +472,10 @@ int TPCHandler::RunCurlWithStreamsImpl(XrdHttpExtReq &req, State &state,
         if (!handles[0]->Finalize()) {
             std::stringstream ss2;
             ss2 << "Failed to finalize and close file handle.";
+            std::string handleErrMsg = handles[0]->GetErrorMessage();
+            if(handleErrMsg.size()) {
+              ss2 << " " << handleErrMsg;
+            }
             ss << generateClientErr(ss2, rec);
             logTransferEvent(LogMask::Error, rec, "MULTISTREAM_ERROR",
                 ss2.str());

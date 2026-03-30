@@ -40,6 +40,7 @@
 #include "XrdHttpReq.hh"
 #include "XrdHttpTrace.hh"
 #include "XrdHttpExtHandler.hh"
+#include "XrdHttpHeaderUtils.hh"
 #include <cstring>
 #include <arpa/inet.h>
 #include <sstream>
@@ -182,10 +183,12 @@ int XrdHttpReq::parseLine(char *line, int len) {
       destination.assign(val, line+len-val);
       trim(destination);
     } else if (!strcasecmp(key, "want-digest")) {
-      m_req_digest.assign(val, line + len - val);
-      trim(m_req_digest);
+      // Discard Want-Repr-Digest in favor of Want-Digest
+      m_want_repr_digest.clear();
+      m_want_digest.assign(val, line + len - val);
+      trim(m_want_digest);
       //Transform the user requests' want-digest to lowercase
-      std::transform(m_req_digest.begin(),m_req_digest.end(),m_req_digest.begin(),::tolower);
+      std::transform(m_want_digest.begin(), m_want_digest.end(), m_want_digest.begin(), ::tolower);
     } else if (!strcasecmp(key, "depth")) {
       depth = -1;
       if (strcmp(val, "infinity"))
@@ -210,6 +213,13 @@ int XrdHttpReq::parseLine(char *line, int len) {
     } else if (!strcasecmp(key,"origin")) {
       m_origin = val;
       trim(m_origin);
+    } else if (!strcasecmp(key,"repr-digest")) {
+      XrdHttpHeaderUtils::parseReprDigest(val, m_repr_digest);
+    } else if (!strcasecmp(key,"want-repr-digest")) {
+      if(m_want_digest.empty()) {
+        // If Want-Digest was set, don't parse want-repr-digest
+        XrdHttpHeaderUtils::parseWantReprDigest(val, m_want_repr_digest);
+      }
     } else {
       // Some headers need to be translated into "local" cgi info.
       auto it = std::find_if(prot->hdr2cgimap.begin(), prot->hdr2cgimap.end(),[key](const auto & item) {
@@ -333,12 +343,12 @@ int XrdHttpReq::parseFirstLine(char *line, int len) {
       request = rtDELETE;
     } else if (!strcmp(key, "PROPFIND")) {
       request = rtPROPFIND;
-
     } else if (!strcmp(key, "MKCOL")) {
       request = rtMKCOL;
-
     } else if (!strcmp(key, "MOVE")) {
       request = rtMOVE;
+    } else if (!strcmp(key, "COPY")) {
+      request = rtCOPY;
     } else {
       request = rtUnknown;
     }
@@ -622,8 +632,11 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
   } else
     appendOpaque(redirdest, 0, 0, 0);
 
+  if (!prot->strp_cgi_params.empty()) {
+    stripCgi(redirdest, prot->strp_cgi_params); /* appendOpaque() may have added credentials */
+  }
   
-  TRACE(REQ, " XrdHttpReq::Redir Redirecting to " << obfuscateAuth(redirdest.c_str()).c_str());
+  TRACE(REQ, " XrdHttpReq::Redir Redirecting to " << redirdest.c_str());
 
   if (request != rtGET)
     prot->SendSimpleResp(307, NULL, (char *) redirdest.c_str(), 0, 0, keepalive);
@@ -836,9 +849,39 @@ void XrdHttpReq::generateWebdavErrMsg() {
 
 }
 
+int XrdHttpReq::prepareChecksumQuery(XrdHttpChecksumHandler::XrdHttpChecksumRawPtr &outCksum,
+                                     XrdOucString &outResourceDigestOpaque) {
+  const char *opaque = strchr(resourceplusopaque.c_str(), '?');
+
+  outResourceDigestOpaque = resourceplusopaque;
+
+  if(m_want_digest.size()) {
+    // According to rfc9530 "Integrity preference fields are only a hint. The receiver of the
+    // field can ignore it and send an Integrity field using any algorithm
+    // or omit the field entirely.
+    // However, in the case a client requests both Want-Digest AND Want-Repr-Digest,
+    // we will return a 'Digest' header in response to the Want-Digest request in order to keep backward compatibility.
+    outCksum = prot->cksumHandler.getChecksumToRunWantDigest(m_want_digest);
+  } else {
+    // Want-Repr-Digest has been passed alone, deduce the checksum to run from that header
+    outCksum = prot->cksumHandler.getChecksumToRunWantReprDigest(m_want_repr_digest);
+  }
+  if(!outCksum) {
+    // No HTTP IANA checksums have been configured by the server admin, return a "METHOD_NOT_ALLOWED" error
+    prot->SendSimpleResp(405, NULL, NULL, (char *) "No HTTP-IANA compatible checksums have been configured.", 0, false);
+    return -1;
+  }
+  outResourceDigestOpaque += !opaque ? "?" : "&";
+  outResourceDigestOpaque += "cks.type=";
+  outResourceDigestOpaque += outCksum->getXRootDConfigDigestName().c_str();
+
+  return 0;
+}
+
 int XrdHttpReq::ProcessHTTPReq() {
 
   kXR_int32 l;
+  if (startTime == std::chrono::steady_clock::time_point::min()) startTime = std::chrono::steady_clock::now();
 
   // State variable for tracking the query parameter search
   // - 0: Indicates we've not yet searched the URL for '?'
@@ -905,10 +948,11 @@ int XrdHttpReq::ProcessHTTPReq() {
 
   switch (request) {
     case XrdHttpReq::rtUnset:
+      return -1;
     case XrdHttpReq::rtUnknown:
     case XrdHttpReq::rtMalformed: {
       generateWebdavErrMsg();
-      prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), false);
+      prot->SendSimpleResp(400, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), false);
       reset();
       return -1;
     }
@@ -922,23 +966,10 @@ int XrdHttpReq::ProcessHTTPReq() {
         }
         return 0;
       } else {
-        const char *opaque = strchr(resourceplusopaque.c_str(), '?');
         // Note that doChksum requires that the memory stays alive until the callback is invoked.
-        m_resource_with_digest = resourceplusopaque;
-
-        m_req_cksum = prot->cksumHandler.getChecksumToRun(m_req_digest);
-        if(!m_req_cksum) {
-            // No HTTP IANA checksums have been configured by the server admin, return a "METHOD_NOT_ALLOWED" error
-            // We should not send body in response to HEAD request
-            prot->SendSimpleResp(HTTP_METHOD_NOT_ALLOWED, NULL, NULL, NULL, 0, false);
-            return -1;
-        }
-        if (!opaque) {
-          m_resource_with_digest += "?cks.type=";
-          m_resource_with_digest += m_req_cksum->getXRootDConfigDigestName().c_str();
-        } else {
-          m_resource_with_digest += "&cks.type=";
-          m_resource_with_digest += m_req_cksum->getXRootDConfigDigestName().c_str();
+        int prepareCksum = prepareChecksumQuery(m_req_cksum, m_resource_with_digest);
+        if(prepareCksum < 0) {
+          return -1;
         }
         if (prot->doChksum(m_resource_with_digest) < 0) {
           // In this case, the Want-Digest header was set and PostProcess gave the go-ahead to do a checksum.
@@ -1045,26 +1076,14 @@ int XrdHttpReq::ProcessHTTPReq() {
           return 0;
         }
         case 1: // Checksum request
-          if (!(fileflags & kXR_isDir) && !m_req_digest.empty()) {
-            // In this case, the Want-Digest header was set.
-            bool has_opaque = strchr(resourceplusopaque.c_str(), '?');
-            // Note that doChksum requires that the memory stays alive until the callback is invoked.
-            m_req_cksum = prot->cksumHandler.getChecksumToRun(m_req_digest);
-            if(!m_req_cksum) {
-                // No HTTP IANA checksums have been configured by the server admin, return a "METHOD_NOT_ALLOWED" error
-                prot->SendSimpleResp(HTTP_METHOD_NOT_ALLOWED, NULL, NULL, (char *) "No HTTP-IANA compatible checksums have been configured.", 0, false);
-                return -1;
-            }
-            m_resource_with_digest = resourceplusopaque;
-            if (has_opaque) {
-              m_resource_with_digest += "&cks.type=";
-              m_resource_with_digest += m_req_cksum->getXRootDConfigDigestName().c_str();
-            } else {
-              m_resource_with_digest += "?cks.type=";
-              m_resource_with_digest += m_req_cksum->getXRootDConfigDigestName().c_str();
+          if (!(fileflags & kXR_isDir) && (!m_want_digest.empty() || !m_want_repr_digest.empty())) {
+            // In this case, the Want-Digest or then Want-Repr-Digest header was set.
+            int prepareCksum = prepareChecksumQuery(m_req_cksum, m_resource_with_digest);
+            if(prepareCksum < 0) {
+              return -1;
             }
             if (prot->doChksum(m_resource_with_digest) < 0) {
-              prot->SendSimpleResp(500, NULL, NULL, (char *) "Failed to start internal checksum request to satisfy Want-Digest header.", 0, false);
+              prot->SendSimpleResp(500, NULL, NULL, (char *) "Failed to start internal checksum request to satisfy Want-Digest or Want-Repr-Digest header.", 0, false);
               return -1;
             }
             return 0;
@@ -1091,7 +1110,8 @@ int XrdHttpReq::ProcessHTTPReq() {
         case 3: // List directory
           if (fileflags & kXR_isDir) {
             if (prot->listdeny) {
-              prot->SendSimpleResp(503, NULL, NULL, (char *) "Listings are disabled.", 0, false);
+              // Return 403 as the administrator forbid the directory listing
+              prot->SendSimpleResp(403, NULL, NULL, (char *) "Listings are disabled.", 0, false);
               return -1;
             }
 
@@ -1616,63 +1636,48 @@ int XrdHttpReq::ProcessHTTPReq() {
     }
     case XrdHttpReq::rtMOVE:
     {
-      // Incase of a move cgi parameters present in the CGI str
-      // are appended to the destination in case of a MOVE.
-      if (resourceplusopaque != "") {
-        int pos = resourceplusopaque.find("?");
-        if (pos != STR_NPOS) {
-          destination.append((destination.find("?") == std::string::npos) ? "?" : "&");
-          destination.append(resourceplusopaque.c_str() + pos + 1);
-        }
-      }
+      // Skip the protocol part of destination URL
+      size_t skip = destination.find("://");
+      skip = (skip == std::string::npos) ? 0 : skip + 3;
 
-      // --------- MOVE
-      memset(&xrdreq, 0, sizeof (ClientRequest));
-      xrdreq.mv.requestid = htons(kXR_mv);
-
-      std::string s = resourceplusopaque.c_str();
-      s += " ";
-
-      char buf[256];
-      char *ppath;
-      int port = 0;
-      if (parseURL((char *) destination.c_str(), buf, port, &ppath)) {
-        prot->SendSimpleResp(501, NULL, NULL, (char *) "Cannot parse destination url.", 0, false);
-        return -1;
-      }
-
-      char buf2[256];
-      strcpy(buf2, host.c_str());
-      char *pos = strchr(buf2, ':');
-      if (pos) *pos = '\0';
-     
-      // If we are a redirector we enforce that the host field is equal to
-      // whatever was written in the destination url
-      //
-      // If we are a data server instead we cannot enforce anything, we will
-      // just ignore the host part of the destination
-      if ((prot->myRole == kXR_isManager) && strcmp(buf, buf2)) {
+      // If we have a manager role, enforce source and destination are on the same host
+      if (prot->myRole == kXR_isManager && destination.compare(skip, host.size(), host) != 0) {
         prot->SendSimpleResp(501, NULL, NULL, (char *) "Only in-place renaming is supported for MOVE.", 0, false);
         return -1;
       }
 
+      // If needed, append opaque info from source onto destination
+      int pos = resourceplusopaque.find("?");
+      if (pos != STR_NPOS) {
+        destination.append((destination.find("?") == std::string::npos) ? "?" : "&");
+        destination.append(resourceplusopaque.c_str() + pos + 1);
+      }
 
+      size_t path_pos = destination.find('/', skip + 1);
 
+      if (path_pos == std::string::npos) {
+        prot->SendSimpleResp(400, NULL, NULL, (char *) "Cannot determine destination path", 0, false);
+        return -1;
+      }
 
-      s += ppath;
+      // Construct args to kXR_mv request (i.e. <src> + " " + <dst>)
+      std::string mv_args = std::string(resourceplusopaque.c_str()) + " " + destination.substr(path_pos);
 
-      l = s.length() + 1;
-      xrdreq.mv.dlen = htonl(l);
+      l = mv_args.length() + 1;
+
+      // Prepare and run kXR_mv request
+      memset(&xrdreq, 0, sizeof (ClientRequest));
+      xrdreq.mv.requestid = htons(kXR_mv);
       xrdreq.mv.arg1len = htons(resourceplusopaque.length());
+      xrdreq.mv.dlen = htonl(l);
       
-      if (!prot->Bridge->Run((char *) &xrdreq, (char *) s.c_str(), l)) {
-        prot->SendSimpleResp(501, NULL, NULL, (char *) "Could not run request.", 0, false);
+      if (!prot->Bridge->Run((char *) &xrdreq, (char *) mv_args.c_str(), l)) {
+        prot->SendSimpleResp(500, NULL, NULL, (char *) "Could not run request.", 0, false);
         return -1;
       }
 
       // We don't want to be invoked again after this request is finished
       return 1;
-
     }
     default:
     {
@@ -1698,28 +1703,37 @@ XrdHttpReq::PostProcessChecksum(std::string &digest_header) {
                << reinterpret_cast<char *>(iovP[0].iov_base) << "=" 
                << reinterpret_cast<char *>(iovP[iovN-1].iov_base));
 
-    bool convert_to_base64 = m_req_cksum->needsBase64Padding();
-    char *digest_value = reinterpret_cast<char *>(iovP[iovN-1].iov_base);
+    std::string cksumType {reinterpret_cast<char *>(iovP[0].iov_base),iovP[0].iov_len};
+    // Remove '\0' from the actual size of the cksumValue which is at the end of iovP[iovN-1].iov_base
+    size_t cksumValueLen = iovP[iovN-1].iov_len - 1;
+    std::string cksumValue {reinterpret_cast<char *>(iovP[iovN-1].iov_base), cksumValueLen};
+    std::string digest_value = cksumValue;
+
+    // We convert the byte representation of the checksum to base64 if the checksum needs to be base64 encoded (md5 for example)
+    // or if the Want-Repr-Digest header was used
+    bool convert_to_base64 = m_req_cksum->needsBase64Padding() || !m_want_repr_digest.empty();
     if (convert_to_base64) {
-      size_t digest_length = strlen(digest_value);
-      unsigned char *digest_binary_value = (unsigned char *)malloc(digest_length);
-      if (!Fromhexdigest(reinterpret_cast<unsigned char *>(digest_value), digest_length, digest_binary_value)) {
+      std::vector<uint8_t> digest_binary_value;
+      if (!Fromhexdigest(cksumValue,digest_binary_value)) {
         prot->SendSimpleResp(500, NULL, NULL, (char *) "Failed to convert checksum hexdigest to base64.", 0, false);
-        free(digest_binary_value);
         return -1;
       }
-      char *digest_base64_value = (char *)malloc(digest_length + 1);
-      // Binary length is precisely half the size of the hex-encoded digest_value; hence, divide length by 2.
-      Tobase64(digest_binary_value, digest_length/2, digest_base64_value);
-      free(digest_binary_value);
-      digest_value = digest_base64_value;
+      Tobase64(digest_binary_value,digest_value);
     }
 
-    digest_header = "Digest: ";
-    digest_header += m_req_cksum->getHttpName();
-    digest_header += "=";
-    digest_header += digest_value;
-    if (convert_to_base64) {free(digest_value);}
+    if(m_want_repr_digest.empty()) {
+      digest_header = "Digest: ";
+      digest_header += m_req_cksum->getHttpName();
+      digest_header += "=";
+      digest_header += digest_value;
+    } else {
+      digest_header = "Repr-Digest: ";
+      digest_header += m_req_cksum->getHttpName();
+      digest_header += "=:";
+      digest_header += digest_value;
+      digest_header += ":";
+    }
+
     return 0;
   } else {
     prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), false);
@@ -2065,20 +2079,23 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
           TRACEI(REQ, "Stat for HEAD " << resource.c_str()
                       << " stat=" << (char *) iovP[0].iov_base);
 
-          long dummyl;
-          sscanf((const char *) iovP[0].iov_base, "%ld %lld %ld %ld",
-                  &dummyl,
+          sscanf((const char *) iovP[0].iov_base, "%lld %lld %ld %ld",
+                  &etagval,
                   &filesize,
                   &fileflags,
                   &filemodtime);
 
-          if (m_req_digest.size()) {
+          if (m_want_digest.size() || m_want_repr_digest.size()) {
             return 0;
           } else {
             if (fileflags & kXR_cachersp) {
               addAgeHeader(response_headers);
               response_headers += "\r\n";
             }
+
+            addETagHeader(response_headers);
+            response_headers += "\r\n";
+
             response_headers += "Accept-Ranges: bytes";
             prot->SendSimpleResp(200, NULL, response_headers.c_str(), NULL, filesize, keepalive);
             return keepalive ? 1 : -1;
@@ -2206,19 +2223,9 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
             }
               
             if (m_transfer_encoding_chunked && m_trailer_headers) {
-              if (prot->ChunkRespHeader(0))
-                return -1;
+              std::string trailer = "X-Transfer-Status: " + std::to_string(httpStatusCode) + ": " + httpErrorBody + "\r\n";
 
-              const std::string crlf = "\r\n";
-              std::stringstream ss;
-              ss << "X-Transfer-Status: " << httpStatusCode << ": " << httpErrorBody << crlf;
-
-              const auto header = ss.str();
-              if (prot->SendData(header.c_str(), header.size()))
-                return -1;
-
-              if (prot->ChunkRespFooter())
-                return -1;
+              if (prot->ChunkResp(trailer.c_str(), -1)) return -1;
             }
 
               if (rrerror) return -1;
@@ -2660,19 +2667,8 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
   return 0;
 }
 
-int
-XrdHttpReq::sendFooterError(const std::string &extra_text) {
+int XrdHttpReq::sendFooterError(const std::string &extra_text) {
   if (m_transfer_encoding_chunked && m_trailer_headers && m_status_trailer) {
-    // A trailer header is appropriate in this case; this is signified by
-    // a chunk with size zero, then the trailer, then a crlf.
-    //
-    // We only send the status trailer when explicitly requested; otherwise a
-    // "normal" HTTP client might simply see a short response and think it's a
-    // success
-
-    if (prot->ChunkRespHeader(0))
-      return -1;
-
     std::stringstream ss;
 
     ss << httpStatusCode;
@@ -2680,36 +2676,36 @@ XrdHttpReq::sendFooterError(const std::string &extra_text) {
       std::string_view statusView(httpErrorBody);
       // Remove trailing newline; this is not valid in a trailer value
       // and causes incorrect framing of the response, confusing clients.
-      if (statusView[statusView.size() - 1] == '\n') {
+      if (!statusView.empty() && statusView.back() == '\n') {
         ss << ": " << statusView.substr(0, statusView.size() - 1);
       } else {
         ss << ": " << httpErrorBody;
       }
     }
 
-    if (!extra_text.empty())
-      ss << ": " << extra_text;
+    if (!extra_text.empty()) ss << ": " << extra_text;
     TRACEI(REQ, ss.str());
     ss << "\r\n";
 
-    const auto header = "X-Transfer-Status: " + ss.str();
-    if (prot->SendData(header.c_str(), header.size()))
-      return -1;
+    const std::string trailer = "X-Transfer-Status: " + ss.str();
 
-    if (prot->ChunkRespFooter())
-      return -1;
+    // delegate everything to ChunkResp (bodylen==-1 means trailers)
+    if (prot->ChunkResp(trailer.c_str(), -1)) return -1;
 
     return keepalive ? 1 : -1;
   } else {
     TRACEI(REQ, "Failure during response: " << httpStatusCode << ": " << httpErrorBody << (extra_text.empty() ? "" : (": " + extra_text)));
     return -1;
-
   }
 }
 
 void XrdHttpReq::addAgeHeader(std::string &headers) {
   long object_age = time(NULL) - filemodtime;
   headers += std::string("Age: ") + std::to_string(object_age < 0 ? 0 : object_age);
+}
+
+void XrdHttpReq::addETagHeader(std::string &headers) {
+  headers += std::string("Etag: \"") + std::to_string(etagval) + "\"";
 }
 
 void XrdHttpReq::reset() {
@@ -2743,13 +2739,17 @@ void XrdHttpReq::reset() {
   allheaders.clear();
 
   // Reset the state of the request's digest request.
-  m_req_digest.clear();
+  m_want_digest.clear();
   m_digest_header.clear();
   m_req_cksum = nullptr;
 
-  m_resource_with_digest = "";
   m_user_agent = "";
   m_origin = "";
+
+  httpStatusCode = -1;
+  initialStatusCode= -1;
+  httpErrorCode = "";
+  httpErrorBody = "";
 
   headerok = false;
   keepalive = true;
@@ -2787,20 +2787,18 @@ void XrdHttpReq::reset() {
   iovN = 0;
   iovL = 0;
 
-
   if (opaque) delete(opaque);
   opaque = 0;
 
   fopened = false;
-
   final = false;
-
   mScitag = -1;
 
-  httpStatusCode = -1;
-  httpErrorCode = "";
-  httpErrorBody = "";
+  m_repr_digest.clear();
+  m_want_repr_digest.clear();
 
+  monState = XrdHttpMonState::NEW;
+  startTime = std::chrono::steady_clock::time_point::min();
 }
 
 void XrdHttpReq::getfhandle() {

@@ -18,8 +18,7 @@
 #include <fstream>
 #include <unordered_map>
 #include <tuple>
-
-#include "fcntl.h"
+#include <cstdlib>
 
 #include "INIReader.h"
 #include "picojson.h"
@@ -130,6 +129,12 @@ XrdAccPrivs AddPriv(Access_Operation op, XrdAccPrivs privs)
         case AOP_Update:
             new_privs |= static_cast<int>(XrdAccPriv_Update);
             break;
+        case AOP_Stage:
+            new_privs |= static_cast<int>(XrdAccPriv_Stage);
+            break;
+        case AOP_Poll:
+            new_privs |= static_cast<int>(XrdAccPriv_Poll);
+            break;
     };
     return static_cast<XrdAccPrivs>(new_privs);
 }
@@ -151,6 +156,8 @@ const std::string OpToName(Access_Operation op) {
         case AOP_Rename: return "mv";
         case AOP_Stat: return "stat";
         case AOP_Update: return "update";
+        case AOP_Stage: return "stage";
+        case AOP_Poll: return "poll";
     };
     return "unknown";
 }
@@ -514,7 +521,7 @@ public:
         uint64_t now = monotonic_time();
         Check(now);
         {
-            std::lock_guard<std::mutex> guard(m_mutex);
+            std::lock_guard<std::mutex> guard(m_map_mutex);
             const auto iter = m_map.find(authz);
             if (iter != m_map.end() && !iter->second->expired()) {
                 access_rules = iter->second;
@@ -545,7 +552,7 @@ public:
                 m_log.Log(LogMask::Warning, "Access", "Error generating ACLs for authorization", exc.what());
                 return OnMissing(Entity, path, oper, env);
             }
-            std::lock_guard<std::mutex> guard(m_mutex);
+            std::lock_guard<std::mutex> guard(m_map_mutex);
             m_map[authz] = access_rules;
         } else if (m_log.getMsgMask() & LogMask::Debug) {
             m_log.Log(LogMask::Debug, "Access", "Cached token", access_rules->str().c_str());
@@ -965,6 +972,11 @@ private:
                     xrd_rules.emplace_back(AOP_Chmod, path);
                     xrd_rules.emplace_back(AOP_Stat, path);
                     xrd_rules.emplace_back(AOP_Delete, path);
+                } else if (!strcmp(acl_authz, "storage.stage")) {
+                    xrd_rules.emplace_back(AOP_Stage, path);
+                    xrd_rules.emplace_back(AOP_Poll, path);
+                } else if (!strcmp(acl_authz, "storage.poll")) {
+                    xrd_rules.emplace_back(AOP_Poll, path);
                 } else if (!strcmp(acl_authz, "write")) {
                     paths_write_seen.insert(path);
                 }
@@ -1041,6 +1053,28 @@ private:
                 scitoken_config_set_str("tls.ca_file", params->cafile.c_str(), nullptr);
 #else
                 m_log.Log(LogMask::Warning, "Config", "tls.ca_file is set but the platform's libscitokens.so does not support setting config parameters");
+#endif
+            }
+        }
+
+        // set cache file location
+        if (const char* xdg_cache_home = getenv("XDG_CACHE_HOME")) {
+            m_log.Log(LogMask::Info, "Config", "Scitokens cache file location env var is set to : ", xdg_cache_home);
+        } else {
+            // construct xdg_cache_home to be <adminpath>/.cache
+            const char* adminpath_env = getenv("XRDADMINPATH");
+            if (!adminpath_env || !*adminpath_env) {
+                m_log.Log(LogMask::Warning, "Config", "XRDADMINPATH is not defined; leaving cache location unset");
+            } else {
+                std::string adminpath = adminpath_env;
+                while (adminpath.size() > 1 && adminpath.back() == '/') adminpath.pop_back();
+                std::string xdg_cache_home_str = adminpath + "/.cache";
+                m_log.Log(LogMask::Info, "Config", "Scitokens cache file location env var is not set; using : ", xdg_cache_home_str.c_str());
+
+#ifdef HAVE_SCITOKEN_CONFIG_SET_STR
+                scitoken_config_set_str("keycache.cache_home", xdg_cache_home_str.c_str(), nullptr);
+#else
+                setenv("XDG_CACHE_HOME", xdg_cache_home_str.c_str(), 1);
 #endif
             }
         }
@@ -1329,14 +1363,22 @@ private:
 
     void Check(uint64_t now)
     {
-        if (now <= m_next_clean) {return;}
-        std::lock_guard<std::mutex> guard(m_mutex);
+        // Bail out if another thread is already checking
+        std::unique_lock<std::mutex> lock(m_check_mutex, std::try_to_lock);
+        if (!lock.owns_lock()) {return;}
 
-        for (auto iter = m_map.begin(); iter != m_map.end(); ) {
-            if (iter->second->expired()) {
-                iter = m_map.erase(iter);
-            } else {
-                ++iter;
+        // Check if cleaning is required
+        if (now <= m_next_clean) {return;}
+
+        // Clean expired m_map entries
+        {
+            std::lock_guard<std::mutex> guard(m_map_mutex);
+            for (auto iter = m_map.begin(); iter != m_map.end(); ) {
+                if (iter->second->expired()) {
+                    iter = m_map.erase(iter);
+                } else {
+                    ++iter;
+                }
             }
         }
         Reconfig();
@@ -1345,11 +1387,12 @@ private:
     }
 
     bool m_config_lock_initialized{false};
-    std::mutex m_mutex;
     pthread_rwlock_t m_config_lock;
     std::vector<std::string> m_audiences;
     std::vector<const char *> m_audiences_array;
     std::map<std::string, std::shared_ptr<XrdAccRules>> m_map;
+    std::mutex m_check_mutex;
+    std::mutex m_map_mutex;
     XrdAccAuthorize* m_chain;
     const std::string m_parms;
     std::vector<const char*> m_valid_issuers_array;

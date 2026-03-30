@@ -10,8 +10,7 @@ together with the extra dependencies required to enable them.
 | Feature               | Dependencies                             |
 |:----------------------|:-----------------------------------------|
 | FUSE support          | fuse-devel                               |
-| HTTP support (client) | davix-devel                              |
-| HTTP support (server) | libcurl-devel                            |
+| HTTP support          | libcurl-devel                            |
 | Erasure coding        | isa-l-devel                              |
 | Kerberos5             | krb5-devel                               |
 | Macaroons             | json-c-devel libmacaroons-devel          |
@@ -22,10 +21,10 @@ together with the extra dependencies required to enable them.
 | VOMS                  | voms-devel                               |
 | Testing               | gtest-devel                              |
 
-Other optional dependencies: tinyxml-devel, libxml2-devel. These have bundled
-copies which are used if not found in the system. In the following sections, we
-show how to install all available dependencies in most of the supported operating
-systems.
+Other optional dependencies: libxml2-devel. If not available, only the XML
+reader based on tinyxml will be available to parse metalink files. In the
+following sections, we show how to install all available dependencies in
+most of the supported operating systems.
 
 #### RPM-based distributions: Alma, CentOS Stream, Fedora, Rocky, RedHat
 
@@ -43,7 +42,6 @@ already enabled by default, like `PowerTools` or `crb`.
 dnf install \
     cmake \
     curl-devel \
-    davix-devel \
     diffutils \
     file \
     fuse-devel \
@@ -63,7 +61,6 @@ dnf install \
     readline-devel \
     scitokens-cpp-devel \
     systemd-devel \
-    tinyxml-devel \
     voms-devel \
     yasm \
     zlib-devel
@@ -78,7 +75,6 @@ disabled if their dependencies are not available to be installed via apt.
 ```sh
 apt install \
     cmake \
-    davix-dev \
     g++ \
     libcurl4-openssl-dev \
     libfuse-dev \
@@ -91,7 +87,6 @@ apt install \
     libscitokens-dev \
     libssl-dev \
     libsystemd-dev \
-    libtinyxml-dev \
     libxml2-dev \
     make \
     pkg-config \
@@ -111,17 +106,15 @@ install dependencies as well when building XRootD from source:
 brew install \
     cmake \
     curl \
-    davix \
-    gcc \
     googletest \
-    isa-l \
     krb5 \
     libxml2 \
     libxcrypt \
+    libzip \
     make \
-    openssl@1.1 \
-    pkg-config \
-    python@3.11 \
+    openssl@3 \
+    pkgconf \
+    python@3.14 \
     readline \
     zlib \
 ```
@@ -164,10 +157,9 @@ the build:
 | `ENABLE_READLINE`  |  TRUE   | Enable readline support in the commandline utilities
 | `ENABLE_SCITOKENS` |  TRUE   | Enable SciTokens plugin (server only)
 | `ENABLE_VOMS`      |  TRUE   | Enable VOMS plug-in
-| `ENABLE_XRDCLHTTP` |  TRUE   | Enable xrdcl-http plugin
 | `ENABLE_XRDCL`     |  TRUE   | Enable XRootD client
 | `ENABLE_CEPH`      |  FALSE  | Enable Ceph plugin (XrdCeph)
-| `ENABLE_XRDEC`     |  FALSE  | Enable support for erasure coding
+| `ENABLE_XRDEC`     |  FALSE  | Enable support for erasure coding (DEPRECATED)
 | `ENABLE_ASAN`      |  FALSE  | Build with adress sanitizer enabled
 | `ENABLE_TSAN`      |  FALSE  | Build with thread sanitizer enabled
 | `ENABLE_TESTS`     |  FALSE  | Enable unit tests

@@ -342,7 +342,8 @@ void XrdSys::IOEvents::Channel::Delete()
            chMutex.UnLock();
            cbDone.Wait();
           }
-      }
+      } else chMutex.UnLock();
+
 // It is now safe to release the storage
 //
    IF_TRACE(Delete,chFD,"chan="<< std::hex<<(void *)this<< std::dec);
@@ -736,7 +737,11 @@ bool XrdSys::IOEvents::Poller::CbkXeq(XrdSys::IOEvents::Channel *cP, int events,
 //
    if (cP->chStat != Channel::isCBMode)
       {if (cP->chStat == Channel::isDead)
-          ((XrdSysSemaphore *)cP->chCBA)->Post();
+          {XrdSysSemaphore *theSem = (XrdSysSemaphore *)cP->chCBA;
+           // channel will be destroyed shortly after post, unlock mutex before
+           cbkMHelp.UnLock();
+           theSem->Post();
+          }
        return true;
       }
    cP->chStat = Channel::isClear;

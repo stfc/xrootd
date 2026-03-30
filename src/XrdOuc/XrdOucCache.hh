@@ -4,7 +4,7 @@
 /*                                                                            */
 /*                        X r d O u c C a c h e . h h                         */
 /*                                                                            */
-/* (c) 2019 by the Board of Trustees of the Leland Stanford, Jr., University  */
+/* (c) 2026 by the Board of Trustees of the Leland Stanford, Jr., University  */
 /*                            All Rights Reserved                             */
 /*   Produced by Andrew Hanushevsky for Stanford University under contract    */
 /*              DE-AC02-76-SFO0515 with the Department of Energy              */
@@ -26,16 +26,17 @@
 /* COPYING (GPL license).  If not, see <http://www.gnu.org/licenses/>.        */
 /*                                                                            */
 /* The copyright holder's institutional names and contributor's names may not */
-/* be used to endorse or promote products derived from this software without  */
 /* specific prior written permission of the institution or contributor.       */
 /******************************************************************************/
 
 #include <cerrno>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 #include "XrdOuc/XrdOucCacheStats.hh"
 #include "XrdOuc/XrdOucIOVec.hh"
+#include "XrdOuc/XrdOucRange.hh"
 
 struct stat;
 class  XrdOucEnv;
@@ -91,7 +92,17 @@ void     DetachDone() = 0;
          XrdOucCacheIOCD() {}
 virtual ~XrdOucCacheIOCD() {}
 };
-  
+
+/******************************************************************************/
+/*                         X r d O u c C a c h e O p                          */
+/******************************************************************************/
+
+struct XrdOucCacheOp
+      {enum Code {QFinfo  = 0,  // Requires a file   target
+                  QFSinfo = 1   // Requires a global target
+                 };
+      };
+
 /******************************************************************************/
 /*                   C l a s s   X r d O u c C a c h e I O                    */
 /******************************************************************************/
@@ -123,6 +134,22 @@ public:
 //------------------------------------------------------------------------------
 
 virtual bool Detach(XrdOucCacheIOCD &iocd) = 0;
+
+//------------------------------------------------------------------------------
+//! Issue a special file control operation (synchronous).
+//!
+//! @param  opc    The operation code (one of the enums).
+//! @param  args   The argument as required by opc.
+//! @param  resp   Where the response is to be placed.
+//!
+//! @return 0 upon success or -errno upon failure.
+//------------------------------------------------------------------------------
+
+virtual int  Fcntl(XrdOucCacheOp::Code opc, const std::string& args,
+                                                  std::string& resp)
+                  {resp = "Function not supported";
+                   return -ENOTSUP;
+                  }
 
 //------------------------------------------------------------------------------
 //! Obtain size of the file.
@@ -280,6 +307,17 @@ static const int SingleUse = 0x0001; //!< Mark pages for single use
 
 virtual void Preread(long long offs, int rlen, int opts=0)
                     {(void)offs; (void)rlen; (void)opts;}
+
+//------------------------------------------------------------------------------
+//! Perform an asynchronous vector preread (may be ignored).
+//!
+//! @param  rlist a vector of byte ranges to preread.
+//------------------------------------------------------------------------------
+
+virtual void Preread(XrdOucRangeList& rlist)
+                    {for (auto it = rlist.begin(); it != rlist.end(); it++)
+                         Preread(it->offset, it->size);
+                    }
 
 //-----------------------------------------------------------------------------
 //! Set automatic preread parameters for this file (may be ignored).
@@ -485,7 +523,7 @@ virtual    ~XrdOucCacheIO() {}  // Always use Detach() instead of direct delete!
 /******************************************************************************/
 /*                     C l a s s   X r d O u c C a c h e                      */
 /******************************************************************************/
-  
+
 //------------------------------------------------------------------------------
 //! The XrdOucCache class is used to define a cache. The cache is associated
 //! with one or more XrdOucCacheIO objects using the Attach() method.
@@ -522,6 +560,22 @@ virtual
 XrdOucCacheIO *Attach(XrdOucCacheIO *ioP, int opts=0) = 0;
 
 //------------------------------------------------------------------------------
+//! Issue a special file control operation (synchronous).
+//!
+//! @param  opc    The operation code (one of the enums).
+//! @param  args   The argument as required by opc.
+//! @param  resp   Where the response is to be placed.
+//!
+//! @return 0 upon success or -errno upon failure.
+//------------------------------------------------------------------------------
+
+virtual int  Fcntl(XrdOucCacheOp::Code opc, const std::string& args,
+                                                  std::string& resp)
+                  {resp = "Function not supported";
+                   return -ENOTSUP;
+                  }
+
+//------------------------------------------------------------------------------
 //! Get the path to a file that is complete in the local cache. By default, the
 //! file must be complete in the cache (i.e. no blocks are missing). This can
 //! be overridden. Thes path can be used to access the file on the local node.
@@ -555,7 +609,7 @@ XrdOucCacheIO *Attach(XrdOucCacheIO *ioP, int opts=0) = 0;
 //!                  -errno describing why. If a buffer was supplied and a
 //!                  path could be generated it is returned only if "why" is
 //!                  ForInfo or ForPath. Otherwise, a null path is returned.
-//!                  
+//!
 //!                  Common return codes are:
 //!                  -EINVAL       an argument is invalid.
 //!                  -EISDIR       target is a directory not a file.
@@ -586,7 +640,7 @@ virtual int    LocalFilePath(const char *url, char *buff=0, int blen=0,
 //! @param  oflags - Standard Unix open flags (see open(2)).
 //! @param  mode   - Standard mode flags if file is being created.
 //!
-//! @return <0 Error has occurred, return value is -errno; fail open request. 
+//! @return <0 Error has occurred, return value is -errno; fail open request.
 //!            The error code -EUSERS may be returned to trigger overload
 //!            recovery as specified by the xrootd.fsoverload directive. No
 //!            other method should return this error code.
@@ -714,7 +768,7 @@ virtual       ~XrdOucCache() {}
 /******************************************************************************/
 /*               C r e a t i n g   C a c h e   P l u g - I n s                */
 /******************************************************************************/
-  
+
 //------------------------------------------------------------------------------
 //! Your cache plug-in must exist in a shared library and have the following
 //! extern C function defined whose parameters are:

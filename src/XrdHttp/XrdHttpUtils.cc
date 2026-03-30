@@ -55,67 +55,6 @@
 #include "XrdSec/XrdSecEntity.hh"
 #include "XrdOuc/XrdOucString.hh"
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static HMAC_CTX* HMAC_CTX_new() {
-  HMAC_CTX *ctx = (HMAC_CTX *)OPENSSL_malloc(sizeof(HMAC_CTX));
-  if (ctx) HMAC_CTX_init(ctx);
-  return ctx;
-}
-
-static void HMAC_CTX_free(HMAC_CTX *ctx) {
-  if (ctx) {
-    HMAC_CTX_cleanup(ctx);
-    OPENSSL_free(ctx);
-  }
-}
-#endif
-
-
-// GetHost from URL
-// Parse an URL and extract the host name and port
-// Return 0 if OK
-int parseURL(char *url, char *host, int &port, char **path) {
-  // http://x.y.z.w:p/path
-
-  *path = 0;
-
-  // look for the second slash
-  char *p = strstr(url, "//");
-  if (!p) return -1;
-
-
-  p += 2;
-
-  // look for the end of the host:port
-  char *p2 = strchr(p, '/');
-  if (!p2) return -1;
-
-  *path = p2;
-
-  char buf[256];
-  int l = std::min((int)(p2 - p), (int)sizeof (buf));
-  strncpy(buf, p, l);
-  buf[l] = '\0';
-
-  // Now look for :
-  p = strchr(buf, ':');
-  if (p) {
-    int l = std::min((int)(p - buf), (int)sizeof (buf));
-    strncpy(host, buf, l);
-    host[l] = '\0';
-
-    port = atoi(p + 1);
-  } else {
-    port = 0;
-
-
-    strcpy(host, buf);
-  }
-
-  return 0;
-}
-
-
 // Encode an array of bytes to base64
 
 void Tobase64(const unsigned char *input, int length, char *out) {
@@ -148,14 +87,86 @@ void Tobase64(const unsigned char *input, int length, char *out) {
   return;
 }
 
+void Tobase64(const std::vector<uint8_t> & input, std::string & base64Output) {
+  BIO *bmem, *b64;
+  BUF_MEM *bptr;
+
+  base64Output.clear();
+
+  if(input.empty()) {
+    return;
+  }
+
+  b64 = BIO_new(BIO_f_base64());
+  BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL);
+  bmem = BIO_new(BIO_s_mem());
+  BIO_push(b64, bmem);
+  BIO_write(b64, input.data(), input.size());
+
+  if (BIO_flush(b64) <= 0) {
+    BIO_free_all(b64);
+    return;
+  }
+
+  BIO_get_mem_ptr(b64, &bptr);
+
+  base64Output.assign(bptr->data,bptr->length);
+
+  BIO_free_all(b64);
+}
+
+void base64ToBytes(const std::string & base64digest, std::vector<uint8_t> & outputBytes) {
+  outputBytes.clear();
+
+  if (base64digest.empty()) {
+    return;
+  }
+
+  BIO *b64 = BIO_new(BIO_f_base64());
+  BIO_set_flags(b64, BIO_FLAGS_BASE64_NO_NL); // match your encoder
+
+  BIO *bmem = BIO_new_mem_buf(base64digest.data(), static_cast<int>(base64digest.size()));
+  bmem = BIO_push(b64, bmem);
+
+  // Estimate maximum size (base64 expands data by ~33%)
+  std::vector<uint8_t> buffer(base64digest.size());
+
+  int decodedLen = BIO_read(bmem, buffer.data(), static_cast<int>(buffer.size()));
+  if (decodedLen > 0) {
+    buffer.resize(decodedLen);
+    outputBytes.swap(buffer);
+  } else {
+    outputBytes.clear(); // decoding failed
+  }
+
+  BIO_free_all(bmem);
+}
+
+void bytesToHex(const std::vector<uint8_t> & bytes, std::string & output) {
+  static const char* lut = "0123456789abcdef";
+  output.clear();
+  output.reserve(bytes.size() * 2);
+  for (uint8_t b : bytes) {
+    output.push_back(lut[b >> 4]);
+    output.push_back(lut[b & 0x0F]);
+  }
+}
+
+void base64DecodeHex(const std::string & base64, std::string & hexOutput) {
+  std::vector<uint8_t> bytes;
+  base64ToBytes(base64,bytes);
+  bytesToHex(bytes, hexOutput);
+}
+
 
 static int
-char_to_int(int c)
+char_to_int(int ch)
 {
-  if (isdigit(c)) {
+  unsigned char c = static_cast<unsigned char>(ch);
+  if (std::isdigit(c)) {
     return c - '0';
   } else {
-    c = tolower(c);
+    c = ::tolower(c);
     if (c >= 'a' && c <= 'f') {
       return c - 'a' + 10;
     }
@@ -163,17 +174,18 @@ char_to_int(int c)
   }
 }
 
+bool Fromhexdigest(const std::string & hex, std::vector<uint8_t> & outputBytes) {
+  if(hex.size() % 2 != 0) {
+    return false;
+  }
 
-// Decode a hex digest array to raw bytes.
-//
-bool Fromhexdigest(const unsigned char *input, int length, unsigned char *out) {
-  for (int idx=0; idx < length; idx += 2) {
-    int upper =  char_to_int(input[idx]);
-    int lower =  char_to_int(input[idx+1]);
-    if ((upper < 0) || (lower < 0)) {
-      return false;
-    }
-    out[idx/2] = (upper << 4) + lower;
+  outputBytes.reserve(hex.size() / 2);
+
+  for(size_t i = 0; i < hex.size(); i += 2) {
+    int upper = char_to_int(hex[i]);
+    int lower = char_to_int(hex[i + 1]);
+    if (upper < 0 || lower < 0) return false;
+    outputBytes.push_back(static_cast<uint8_t>((upper << 4) + lower));
   }
   return true;
 }
@@ -374,8 +386,11 @@ char *unquote(char *str) {
   int i, j = 0;
 
   for (i = 0; i < l; i++) {
-
     if (str[i] == '%') {
+      if (i + 3 > l) {
+        r[j] = '\0';
+        return r;
+      }
       char savec = str[i + 3];
       str[i + 3] = '\0';
 

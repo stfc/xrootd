@@ -3,9 +3,9 @@
 %bcond_with    clang
 %bcond_with    docs
 %bcond_with    git
+%bcond_with    xrdec
 
 %bcond_without tests
-%bcond_without xrdec
 
 Name:		xrootd
 Epoch:		1
@@ -37,7 +37,6 @@ BuildRequires:	pkgconfig
 BuildRequires:	fuse-devel
 BuildRequires:	krb5-devel
 BuildRequires:	libcurl-devel
-BuildRequires:	tinyxml-devel
 BuildRequires:	libxml2-devel
 BuildRequires:	libzip-devel
 BuildRequires:	ncurses-devel
@@ -57,7 +56,6 @@ BuildRequires:	libmacaroons-devel
 BuildRequires:	libuuid-devel
 BuildRequires:	voms-devel
 BuildRequires:	scitokens-cpp-devel
-BuildRequires:	davix-devel
 BuildRequires:  libxcrypt-devel
 
 %if %{with asan}
@@ -83,12 +81,12 @@ BuildRequires:	python3-sphinx
 BuildRequires:	attr
 BuildRequires:	coreutils
 BuildRequires:	curl
-BuildRequires:	davix
 BuildRequires:	gtest-devel
 BuildRequires:	krb5-server
 BuildRequires:	krb5-workstation
 BuildRequires:	openssl
 BuildRequires:	procps-ng
+BuildRequires:	sqlite
 %endif
 
 %if %{with xrdec}
@@ -263,16 +261,6 @@ SciToken passed during a transfer. Configured appropriately, this
 allows the XRootD server admin to delegate authorization decisions for
 a subset of the namespace to an external issuer.
 
-%package -n xrdcl-http
-Summary:	HTTP client plugin for XRootD
-Group:		System Environment/Libraries
-Requires:	%{name}-libs%{?_isa} = %{epoch}:%{version}-%{release}
-Requires:	%{name}-client-libs%{?_isa} = %{epoch}:%{version}-%{release}
-
-%description -n xrdcl-http
-xrdcl-http is an XRootD client plugin which allows XRootD to interact
-with HTTP repositories.
-
 %if %{with ceph}
 %package ceph
 Summary:	XRootD plugin for interfacing with the Ceph storage platform
@@ -329,9 +317,7 @@ export CXX=clang++
     -DENABLE_TESTS:BOOL=%{with tests} \
     -DENABLE_VOMS:BOOL=TRUE \
     -DENABLE_XRDCL:BOOL=TRUE \
-    -DENABLE_XRDCLHTTP:BOOL=TRUE \
     -DENABLE_XRDEC:BOOL=%{with xrdec} \
-    -DENABLE_XRDCLHTTP:BOOL=TRUE \
     -DXRDCL_ONLY:BOOL=FALSE \
     -DXRDCL_LIB_ONLY:BOOL=FALSE \
     -DENABLE_PYTHON:BOOL=TRUE \
@@ -340,7 +326,7 @@ export CXX=clang++
 
 %cmake3_build
 
-make -C packaging/common -f /usr/share/selinux/devel/Makefile
+make -C config -f /usr/share/selinux/devel/Makefile
 
 %if %{with docs}
 doxygen Doxyfile
@@ -374,52 +360,50 @@ rm -f %{buildroot}%{python3_sitearch}/xrootd-*.*-info/RECORD
 
 %{__python3} -m pip install \
 	--no-deps --ignore-installed --disable-pip-version-check --verbose \
-	--prefix %{buildroot}%{_prefix} %{_vpath_builddir}/bindings/python
+	--prefix %{buildroot}%{_prefix} %{_vpath_builddir}/python
 
 %if %{with docs}
 LD_LIBRARY_PATH=%{buildroot}%{_libdir} \
 PYTHONPATH=%{buildroot}%{python3_sitearch} \
 PYTHONDONTWRITEBYTECODE=1 \
-make -C bindings/python/docs html SPHINXBUILD=sphinx-build-3
+make -C python/docs html SPHINXBUILD=sphinx-build-3
 %endif
 
 # Service unit files
 mkdir -p %{buildroot}%{_unitdir}
-install -m 644 packaging/common/xrootd@.service %{buildroot}%{_unitdir}
-install -m 644 packaging/common/xrootd@.socket %{buildroot}%{_unitdir}
-install -m 644 packaging/common/xrdhttp@.socket %{buildroot}%{_unitdir}
-install -m 644 packaging/common/cmsd@.service %{buildroot}%{_unitdir}
-install -m 644 packaging/common/frm_xfrd@.service %{buildroot}%{_unitdir}
-install -m 644 packaging/common/frm_purged@.service %{buildroot}%{_unitdir}
-mkdir -p %{buildroot}%{_tmpfilesdir}
-install -m 644 packaging/rhel/xrootd.tmpfiles %{buildroot}%{_tmpfilesdir}/%{name}.conf
+install -m 644 systemd/xrootd@.service %{buildroot}%{_unitdir}
+install -m 644 systemd/xrootd@.socket %{buildroot}%{_unitdir}
+install -m 644 systemd/xrdhttp@.socket %{buildroot}%{_unitdir}
+install -m 644 systemd/cmsd@.service %{buildroot}%{_unitdir}
+install -m 644 systemd/frm_xfrd@.service %{buildroot}%{_unitdir}
+install -m 644 systemd/frm_purged@.service %{buildroot}%{_unitdir}
 
 mkdir -p %{buildroot}%{_sysusersdir}
-install -m 644 packaging/rhel/%{name}-sysusers.conf %{buildroot}%{_sysusersdir}/%{name}.conf
+install -m 644 systemd/%{name}-sysusers.conf %{buildroot}%{_sysusersdir}/%{name}.conf
 
 # Server config
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}
-install -m 644 -p packaging/common/%{name}-clustered.cfg \
+install -m 644 -p config/%{name}-clustered.cfg \
 	%{buildroot}%{_sysconfdir}/%{name}/%{name}-clustered.cfg
-install -m 644 -p packaging/common/%{name}-standalone.cfg \
+install -m 644 -p config/%{name}-standalone.cfg \
 	%{buildroot}%{_sysconfdir}/%{name}/%{name}-standalone.cfg
-install -m 644 -p packaging/common/%{name}-filecache-clustered.cfg \
+install -m 644 -p config/%{name}-filecache-clustered.cfg \
 	%{buildroot}%{_sysconfdir}/%{name}/%{name}-filecache-clustered.cfg
-install -m 644 -p packaging/common/%{name}-filecache-standalone.cfg \
+install -m 644 -p config/%{name}-filecache-standalone.cfg \
 	%{buildroot}%{_sysconfdir}/%{name}/%{name}-filecache-standalone.cfg
-sed 's!/usr/lib64/!!' packaging/common/%{name}-http.cfg > \
+sed 's!/usr/lib64/!!' config/%{name}-http.cfg > \
 	%{buildroot}%{_sysconfdir}/%{name}/%{name}-http.cfg
 
 # Client config
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}/client.plugins.d
-install -m 644 -p packaging/common/client.conf \
+install -m 644 -p config/client.conf \
 	%{buildroot}%{_sysconfdir}/%{name}/client.conf
-sed 's!/usr/lib/!!' packaging/common/client-plugin.conf.example > \
-	%{buildroot}%{_sysconfdir}/%{name}/client.plugins.d/client-plugin.conf.example
-sed -e 's!/usr/lib64/!!' -e 's!-5!!' packaging/common/recorder.conf > \
+install -m 644 -p config/client.plugins.d/recorder.conf \
 	%{buildroot}%{_sysconfdir}/%{name}/client.plugins.d/recorder.conf
-sed 's!/usr/lib64/!!' packaging/common/http.client.conf.example > \
-	%{buildroot}%{_sysconfdir}/%{name}/client.plugins.d/xrdcl-http-plugin.conf
+install -m 644 -p config/client.plugins.d/http.conf \
+	%{buildroot}%{_sysconfdir}/%{name}/client.plugins.d/http.conf
+install -m 644 -p config/client.plugins.d/s3.conf \
+	%{buildroot}%{_sysconfdir}/%{name}/client.plugins.d/s3.conf
 
 chmod 644 %{buildroot}%{_datadir}/%{name}/utils/XrdCmsNotify.pm
 
@@ -436,18 +420,18 @@ mkdir -p %{buildroot}%{_localstatedir}/log/%{name}
 mkdir -p %{buildroot}%{_localstatedir}/spool/%{name}
 
 mkdir -p %{buildroot}%{_sysconfdir}/logrotate.d
-install -m 644 -p packaging/common/%{name}.logrotate \
+install -m 644 -p config/%{name}.logrotate \
 	%{buildroot}%{_sysconfdir}/logrotate.d/%{name}
 
 mkdir -p %{buildroot}%{_datadir}/selinux/packages/%{name}
-install -m 644 -p packaging/common/%{name}.pp \
+install -m 644 -p config/%{name}.pp \
 	%{buildroot}%{_datadir}/selinux/packages/%{name}
 
 %if %{with docs}
 	mkdir -p %{buildroot}%{_pkgdocdir}
 	cp -pr doxydoc/html %{buildroot}%{_pkgdocdir}
 
-	cp -pr bindings/python/docs/build/html %{buildroot}%{_pkgdocdir}/python
+	cp -pr python/docs/build/html %{buildroot}%{_pkgdocdir}/python
 	rm %{buildroot}%{_pkgdocdir}/python/.buildinfo
 %endif
 
@@ -461,7 +445,6 @@ install -m 644 -p packaging/common/%{name}.pp \
 %sysusers_create_compat %(tar -z -x -f %{SOURCE0} --no-anchored xrootd-sysusers.conf -O > /tmp/xrootd-sysusers.conf && echo /tmp/xrootd-sysusers.conf)
 
 %post server
-%tmpfiles_create %{_tmpfilesdir}/%{name}.conf
 
 if [ $1 -eq 1 ] ; then
 	systemctl daemon-reload >/dev/null 2>&1 || :
@@ -525,7 +508,6 @@ fi
 %dir %{_datadir}/%{name}
 %{_datadir}/%{name}/utils
 %{_unitdir}/*
-%{_tmpfilesdir}/%{name}.conf
 %{_sysusersdir}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
 %dir %{_sysconfdir}/%{name}/config.d
@@ -591,16 +573,20 @@ fi
 %{_libdir}/libXrdSsiLib.so.*
 %{_libdir}/libXrdSsiShMap.so.*
 # Plugins
+%{_libdir}/libXrdClHttp-5.so
+%{_libdir}/libXrdClS3-5.so
 %{_libdir}/libXrdClProxyPlugin-5.so
 %{_libdir}/libXrdClRecorder-5.so
 %dir %{_sysconfdir}/%{name}
 %config(noreplace) %{_sysconfdir}/%{name}/client.conf
 %dir %{_sysconfdir}/%{name}/client.plugins.d
-%config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/client-plugin.conf.example
+%config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/http.conf
 %config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/recorder.conf
+%config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/s3.conf
 
 %files client-devel
 %{_includedir}/%{name}/XrdCl
+%{_includedir}/%{name}/XrdClHttp
 %{_includedir}/%{name}/XrdPosix
 %{_libdir}/libXrdCl.so
 %if %{with xrdec}
@@ -687,9 +673,6 @@ fi
 %{_libdir}/libXrdAccSciTokens-5.so
 %doc src/XrdSciTokens/README.md
 
-%files -n xrdcl-http
-%{_libdir}/libXrdClHttp-5.so
-%config(noreplace) %{_sysconfdir}/%{name}/client.plugins.d/xrdcl-http-plugin.conf
 
 %if %{with ceph}
 %files ceph

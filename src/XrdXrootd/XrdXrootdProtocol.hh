@@ -241,7 +241,8 @@ private:
 enum RD_func {RD_chmod = 0, RD_chksum,  RD_dirlist, RD_locate, RD_mkdir,
               RD_mv,        RD_prepare, RD_prepstg, RD_rm,     RD_rmdir,
               RD_stat,      RD_trunc,   RD_ovld,    RD_client,
-              RD_open1,     RD_open2,   RD_open3,   RD_open4,  RD_Num};
+              RD_openw,     RD_open1,   RD_open2,   RD_open3,  RD_open4,
+	      RD_Num};
 
        int   do_Auth();
        int   do_Bind();
@@ -250,6 +251,7 @@ enum RD_func {RD_chmod = 0, RD_chksum,  RD_dirlist, RD_locate, RD_mkdir,
        int   do_Chmod();
        int   do_CKsum(int canit);
        int   do_CKsum(char *algT, const char *Path, char *Opaque);
+       int   do_Clone();
        int   do_Close();
        int   do_Dirlist();
        int   do_DirStat(XrdSfsDirectory *dp, char *pbuff, char *opaque);
@@ -390,6 +392,9 @@ static unsigned int getSID();
        void  MonAuth();
        int   SetSF(kXR_char *fhandle, bool seton=false);
 
+       static bool  CloseRequestCb(void *cbarg);
+       bool         RequestClose();
+
 static XrdXrootdXPath        RPList;    // Redirected paths
 static XrdXrootdXPath        RQList;    // Redirected paths for ENOENT
 static XrdXrootdXPath        XPList;    // Exported   paths
@@ -521,6 +526,7 @@ char                       reserved[3];
 short                      rdType;
 char                       Status;
 unsigned char              CapVer;
+bool                       CloseRequested;
 
 // Authentication area
 //
@@ -599,13 +605,13 @@ static int                 hcMax;
 XrdSysMutex                unbindMutex;   // If locked always before streamMutex
 XrdSysMutex                streamMutex;
 XrdSysSemaphore           *reTry;
+XrdSysSemaphore           *boundRecycle;
 XrdSysCondVar2            *endNote;
 XrdXrootdProtocol         *Stream[maxStreams];
 unsigned int               mySID;
 bool                       isActive;
 bool                       isLinkWT;
 bool                       isNOP;
-bool                       isDead;
 
 static const int           maxPio = 4;
 XrdXrootdPio              *pioFirst;

@@ -23,8 +23,11 @@
 #ifndef XROOTD_XRDOUCPRIVATEUTILS_HH
 #define XROOTD_XRDOUCPRIVATEUTILS_HH
 
+#include "XrdOuc/XrdOucString.hh"
+
 #include <regex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 /**
@@ -50,5 +53,15 @@ static inline bool is_subdirectory(const std::string& dir,
  * @param input the string to obfuscate
  */
 std::string obfuscateAuth(const std::string & input);
+
+/**
+ * Strip selected CGI elements (e.g. "authz=...") from a string/URL.
+ * The function removes occurrences of "<key>=<token>" for each key in cgiKeys
+ *
+ * @param url the string/URL to sanitize (modified in-place)
+ * @param cgiKeys CGI parameter names to remove (without the trailing '=')
+ */
+void stripCgi(std::string& url, const std::unordered_set<std::string> &cgiKeys);
+void stripCgi(XrdOucString& url, const std::unordered_set<std::string> &cgiKeys);
 
 #endif //XROOTD_XRDOUCPRIVATEUTILS_HH

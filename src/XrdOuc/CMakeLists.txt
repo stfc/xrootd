@@ -8,6 +8,7 @@ target_sources(XrdUtils
                          XrdOucCacheStats.hh
     XrdOucCallBack.cc    XrdOucCallBack.hh
                          XrdOucChkPnt.hh
+                         XrdOucCloneSeg.hh
     XrdOucCRC.cc         XrdOucCRC.hh
     XrdOucCRC32C.cc      XrdOucCRC32C.hh
     XrdOucECMsg.cc       XrdOucECMsg.hh
@@ -38,6 +39,7 @@ target_sources(XrdUtils
     XrdOucProg.cc        XrdOucProg.hh
     XrdOucPsx.cc         XrdOucPsx.hh
     XrdOucPup.cc         XrdOucPup.hh
+                         XrdOucRange.hh
     XrdOucReqID.cc       XrdOucReqID.hh
     XrdOucSHA3.cc        XrdOucSHA3.hh
     XrdOucSid.cc         XrdOucSid.hh

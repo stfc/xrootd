@@ -38,6 +38,7 @@ int TPCHandler::m_marker_period = 5;
 size_t TPCHandler::m_block_size = 16*1024*1024;
 size_t TPCHandler::m_small_block_size = 1*1024*1024;
 XrdSysMutex TPCHandler::m_monid_mutex;
+bool TPCHandler::allowMissingCRL = false;
 
 XrdVERSIONINFO(XrdHttpGetExtHandler, HttpTPC);
 
@@ -155,12 +156,67 @@ int TPCHandler::closesocket_callback(void *clientp, curl_socket_t fd) {
 }
 
 /******************************************************************************/
+/*           s s l _ c t x _ c a l l b a c k                                  */
+/******************************************************************************/
+
+/**
+ * The callback that will be called by libcurl just before the initialization of an SSL connection
+ * after having processed all other SSL related options to give a last chance to an application to
+ * modify the behavior of the SSL initialization.
+ * https://curl.se/libcurl/c/CURLOPT_SSL_CTX_FUNCTION.html
+ */
+int TPCHandler::ssl_ctx_callback(CURL *curl, void *ssl_ctx, void *clientp) {
+    //TPCLogRecord * rec = (TPCLogRecord *)clientp;
+    SSL_CTX* ctx = static_cast<SSL_CTX*>(ssl_ctx);
+    SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, verify_callback);
+    return CURL_SOCKOPT_OK;
+}
+
+int TPCHandler::verify_callback(int preverify_ok, X509_STORE_CTX* ctx) {
+    if (preverify_ok == 1) return 1;
+
+    int err = X509_STORE_CTX_get_error(ctx);
+
+    if (err == X509_V_ERR_UNABLE_TO_GET_CRL) {
+        X509_STORE_CTX_set_error(ctx, X509_V_OK);
+        return 1;
+    }
+
+    return 0;
+}
+
+/******************************************************************************/
 /*                            p r e p a r e U R L                             */
 /******************************************************************************/
 
 // See XrdHttpTpcUtils::prepareOpenURL() documentation
 std::string TPCHandler::prepareURL(XrdHttpExtReq &req) {
-  return XrdHttpTpcUtils::prepareOpenURL(req.resource, req.headers,hdr2cgimap);
+  XrdHttpTpcUtils::PrepareOpenURLParams parms {req.resource, req.headers, hdr2cgimap,req.mReprDigest};
+  return XrdHttpTpcUtils::prepareOpenURL(parms);
+}
+
+bool TPCHandler::mismatchReprDigest(const std::map<std::string, std::string> & passiveSrvReprDigest, XrdHttpExtReq &req,
+                                    TPCLogRecord &rec) {
+    if(passiveSrvReprDigest.size()) {
+        for (const auto & [digestName, digestValue]: passiveSrvReprDigest) {
+            auto clientDigestMatch = req.mReprDigest.find(digestName);
+            if (clientDigestMatch != req.mReprDigest.end()) {
+                // We found a checksum type match between the client-provided one and the source server-provided one
+                if (clientDigestMatch->second != digestValue) {
+                    // The checksum value does not match, return an error to the client 412 PRECONDITION_FAILED
+                    std::stringstream errMsg;
+                    errMsg << "Mismatch between client-provided and remote server checksums:"
+                           << " client = (" << clientDigestMatch->first << "=" <<  clientDigestMatch->second << ")"
+                           << " server = (" << digestName << "=" << digestValue << ")";
+                    logTransferEvent(LogMask::Error, rec, "REPRDIGEST_VERIFY_FAIL", errMsg.str());
+                    rec.status=412;
+                    req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(errMsg, rec, CURLcode::CURLE_OK).c_str(), 0);
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
 }
 
 /******************************************************************************/
@@ -215,6 +271,10 @@ TPCHandler::ConfigureCurlCA(CURL *curl)
         std::ifstream in(crl_filename, std::ifstream::ate | std::ifstream::binary);
         if(in.tellg() > 0 && m_ca_file->atLeastOneValidCRLFound()){
             curl_easy_setopt(curl, CURLOPT_CRLFILE, crl_filename.c_str());
+            if (allowMissingCRL) {
+                // No need to set the callback if there is no need to do it
+                curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, ssl_ctx_callback);
+            }
         } else {
             std::ostringstream oss;
             oss << "No valid CRL file has been found in the file " << crl_filename << ". Disabling CRL checking.";
@@ -417,8 +477,8 @@ int TPCHandler::OpenWaitStall(XrdSfsFile &fh, const std::string &resource,
 /**
  * Determine size at remote end.
  */
-int TPCHandler::DetermineXferSize(CURL *curl, XrdHttpExtReq &req, State &state,
-                                  bool &success, TPCLogRecord &rec, bool shouldReturnErrorToClient) {
+int TPCHandler::PerformHEADRequest(CURL *curl, XrdHttpExtReq &req, State &state,
+                                   bool &success, TPCLogRecord &rec, bool shouldReturnErrorToClient) {
     success = false;
     curl_easy_setopt(curl, CURLOPT_NOBODY, 1);
     // Set a custom timeout of 60 seconds (= CONNECT_TIMEOUT for convenience) for the HEAD request
@@ -432,46 +492,54 @@ int TPCHandler::DetermineXferSize(CURL *curl, XrdHttpExtReq &req, State &state,
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, 0L);
     if (res == CURLE_HTTP_RETURNED_ERROR) {
         std::stringstream ss;
-        ss << "Remote server failed request while fetching remote size";
+        ss << "Remote server failed request while fetching file information (HEAD)";
         std::stringstream ss2;
         ss2 << ss.str() << ": " << curl_easy_strerror(res);
         rec.status = 500;
-        logTransferEvent(LogMask::Error, rec, "SIZE_FAIL", ss2.str());
+        logTransferEvent(LogMask::Error, rec, "HEAD_FAIL", ss2.str());
         return shouldReturnErrorToClient ? req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec, res).c_str(), 0) : -1;
     } else if (state.GetStatusCode() >= 400) {
         std::stringstream ss;
-        ss << "Remote side " << req.clienthost << " failed with status code " << state.GetStatusCode() << " while fetching remote size";
+        ss << "Remote side " << req.clienthost << " failed with status code " << state.GetStatusCode() << " while fetching remote file information (HEAD)";
         rec.status = 500;
-        logTransferEvent(LogMask::Error, rec, "SIZE_FAIL", ss.str());
+        logTransferEvent(LogMask::Error, rec, "HEAD_FAIL", ss.str());
         return shouldReturnErrorToClient ? req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec).c_str(), 0) : -1;
     } else if (res) {
         std::stringstream ss;
-        ss << "Internal transfer failure while fetching remote size";
+        ss << "Internal transfer failure while fetching remote file information (HEAD)";
         std::stringstream ss2;
         ss2 << ss.str() << " - HTTP library failed: " << curl_easy_strerror(res);
         rec.status = 500;
-        logTransferEvent(LogMask::Error, rec, "SIZE_FAIL", ss2.str());
+        logTransferEvent(LogMask::Error, rec, "HEAD_FAIL", ss2.str());
         return shouldReturnErrorToClient ? req.SendSimpleResp(rec.status, NULL, NULL, generateClientErr(ss, rec, res).c_str(), 0) : -1;
     }
     std::stringstream ss;
-    ss << "Successfully determined remote size for pull request: "
-       << state.GetContentLength();
-    logTransferEvent(LogMask::Debug, rec, "SIZE_SUCCESS", ss.str());
+    ss << "Successfully determined remote file information for pull request: "
+       << "size=" << state.GetContentLength();
+    if(state.GetReprDigest().size()) {
+      unsigned int cksumIndex = 1;
+      for(const auto & [cksumType,cksumValue]: state.GetReprDigest()) {
+        ss << " chksum" << cksumIndex << "=(" << cksumType << "," << cksumValue << ")";
+        cksumIndex++;
+      }
+    }
+    logTransferEvent(LogMask::Debug, rec, "HEAD_SUCCESS", ss.str());
     success = true;
     return 0;
 }
 
-int TPCHandler::GetContentLengthTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t &contentLength, bool & success, TPCLogRecord &rec) {
+int TPCHandler::GetRemoteFileInfoTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t &contentLength, std::map<std::string,std::string> & reprDigest, bool & success, TPCLogRecord &rec) {
     State state(curl,req.tpcForwardCreds);
     //Don't forget to copy the headers of the client's request before doing the HEAD call. Otherwise, if there is a need for authentication,
     //it will fail
-    state.SetupHeaders(req);
+    state.SetupHeadersForHEAD(req);
     int result;
-    //In case we cannot get the content length, we return the error to the client
-    if ((result = DetermineXferSize(curl, req, state, success, rec)) || !success) {
+    //In case we cannot get the file HEAD request, we return the error to the client
+    if ((result = PerformHEADRequest(curl, req, state, success, rec)) || !success) {
         return result;
     }
     contentLength = state.GetContentLength();
+    reprDigest = state.GetReprDigest();
     return result;
 }
   
@@ -579,7 +647,7 @@ int TPCHandler::RunCurlWithUpdates(CURL *curl, XrdHttpExtReq &req, State &state,
     }
 
     // Start response to client prior to the first call to curl_multi_perform
-    int retval = req.StartChunkedResp(201, "Created", "Content-Type: text/plain");
+    int retval = req.StartChunkedResp(202, NULL, "Content-Type: text/plain");
     if (retval) {
         curl_multi_cleanup(multi_handle);
         logTransferEvent(LogMask::Error, rec, "RESPONSE_FAIL",
@@ -965,16 +1033,21 @@ int TPCHandler::ProcessPullReq(const std::string &resource, XrdHttpExtReq &req) 
     {
         //Get the content-length of the source file and pass it to the OSS layer
         //during the open
-        bool success;
-        GetContentLengthTPCPull(curl, req, sourceFileContentLength, success, rec);
+        bool success = false;
+        bool mismatchDigests = false;
+        std::map<std::string,std::string> sourceFileReprDigest;
+        GetRemoteFileInfoTPCPull(curl, req, sourceFileContentLength, sourceFileReprDigest, success, rec);
         if(success) {
             //In the case we cannot get the information from the source server (offline or other error)
-            //we just don't add the size information to the opaque of the local file to open
+            //we just don't add the file information to the opaque of the local file to open
             full_url += "&oss.asize=" + std::to_string(sourceFileContentLength);
-        } else {
-          // In the case the GetContentLength is not successful, an error will be returned to the client
-          // just exit here so we don't open the file!
-          return 0;
+            mismatchDigests = mismatchReprDigest(sourceFileReprDigest,req,rec);
+        }
+        if(!success || mismatchDigests) {
+            // We could not get remote file information, or the checksum provided by the client
+            // does not match the source file one, we already sent the error to the client so we
+            // just exit here
+            return 0;
         }
     }
     int open_result = OpenWaitStall(*fh, full_url, mode|SFS_O_WRONLY,

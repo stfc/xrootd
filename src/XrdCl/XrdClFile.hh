@@ -38,6 +38,12 @@ namespace XrdCl
 {
   struct FileImpl;
   class  FilePlugIn;
+  struct CloneLocations;
+
+  class ExportedFileTemplate {
+  public:
+    virtual ~ExportedFileTemplate() {}
+  };
 
   //----------------------------------------------------------------------------
   //! A file
@@ -45,6 +51,7 @@ namespace XrdCl
   class File
   {
     public:
+    friend struct CloneLocations; // for GetFileTemplate
 
       enum VirtRedirect
       {
@@ -54,13 +61,24 @@ namespace XrdCl
 
       //------------------------------------------------------------------------
       //! Constructor
+      //! @param enablePlugIns enable the plug-in mechanism for the object
       //------------------------------------------------------------------------
       File( bool enablePlugIns = true );
 
       //------------------------------------------------------------------------
       //! Constructor
+      //! @param virtRedirect
+      //! @param enablePlugIns
       //------------------------------------------------------------------------
       File( VirtRedirect virtRedirect, bool enablePlugIns = true );
+
+      //------------------------------------------------------------------------
+      //! Constructor
+      //!
+      //! @param url URL for the file to initialise the plugin for
+      //! @param enablePlugIns enable the plug-in mechanism for the object
+      //------------------------------------------------------------------------
+      File( const std::string &url, bool enablePlugIns = true );
 
       //------------------------------------------------------------------------
       //! Destructor
@@ -86,6 +104,28 @@ namespace XrdCl
                          XRD_WARN_UNUSED_RESULT;
 
       //------------------------------------------------------------------------
+      //! Open the file pointed to by the given URL - async
+      //! Alows one to specify template file. Required if using Dup or Samefs
+      //! flags.
+      //!
+      //! @param rfile   File object of the reference file
+      //! @param url     url of the file to be opened
+      //! @param flags   OpenFlags::Flags
+      //! @param mode    Access::Mode for new files, 0 otherwise
+      //! @param handler handler to be notified about the status of the operation
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus OpenUsingTemplate( const File        &rfile,
+                                      const std::string &url,
+                                      OpenFlags::Flags   flags,
+                                      Access::Mode       mode,
+                                      ResponseHandler   *handler,
+                                      time_t             timeout  = 0 )
+                                      XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
       //! Open the file pointed to by the given URL - sync
       //!
       //! @param url     url of the file to be opened
@@ -99,6 +139,52 @@ namespace XrdCl
                          OpenFlags::Flags   flags,
                          Access::Mode       mode    = Access::None,
                          time_t             timeout = 0 )
+                         XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
+      //! Open the file pointed to by the given URL - sync
+      //! Alows one to specify template file. Required if using Dup or Samefs
+      //! flags.
+      //!
+      //! @param rfile   File object of the reference file
+      //! @param url     url of the file to be opened
+      //! @param flags   OpenFlags::Flags
+      //! @param mode    Access::Mode for new files, 0 otherwise
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus OpenUsingTemplate( const File        &rfile,
+                                      const std::string &url,
+                                      OpenFlags::Flags   flags,
+                                      Access::Mode       mode    = Access::None,
+                                      time_t             timeout = 0 )
+                                      XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
+      //! Clone files and ranges specified into the current file - async
+      //!
+      //! @param locs    files, source ranges and dest offsets to be cloned
+      //! @param handler handler to be notified about the status of the operation
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus Clone( const CloneLocations &locs,
+                          ResponseHandler      *handler,
+                          time_t                timeout = 0 )
+                         XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
+      //! Clone files and ranges specified into the current file - sync
+      //!
+      //! @param locs    files, source ranges and dest offsets to be cloned
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus Clone( const CloneLocations &locs,
+                          time_t                timeout = 0 )
                          XRD_WARN_UNUSED_RESULT;
 
       //------------------------------------------------------------------------
@@ -431,6 +517,44 @@ namespace XrdCl
                              XRD_WARN_UNUSED_RESULT;
 
       //------------------------------------------------------------------------
+      //! Preread scattered data tracts in one operation - async
+      //!
+      //! @param tracts    list of the tracts to preread, no data is returned.
+      //!                  The file object must describe an open file.
+      //!                  The default maximum tract size is
+      //!                  2097136 bytes and the default maximum number
+      //!                  of tracts per request is \024. The server
+      //!                  may be queried using FileSystem::Query for the
+      //!                  actual settings.
+      //! @param handler   handler to be notified when the response arrives
+      //! @param timeout   timeout value, if 0 then the environment default
+      //!                  will be used
+      //! @return          status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus PreRead( const TractList &tracts,
+                            ResponseHandler *handler,
+                            time_t           timeout = 0 )
+                            XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
+      //! Preread scattered data tracts in one operation - sync
+      //!
+      //! @param tracts    list of the tracts to preread, no data is returned.
+      //!                  The file object must describe an open file.
+      //!                  The default maximum tract size is
+      //!                  2097136 bytes and the default maximum number
+      //!                  of tracts per request is 1024. The server
+      //!                  may be queried using FileSystem::Query for the
+      //!                  actual settings.
+      //! @param timeout   timeout value, if 0 then the environment default
+      //!                  will be used
+      //! @return          status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus PreRead( const TractList  &tracts,
+                            time_t            timeout = 0 )
+                            XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
       //! Read scattered data chunks in one operation - async
       //!
       //! @param chunks    list of the chunks to be read and buffers to put
@@ -600,6 +724,42 @@ namespace XrdCl
                           time_t            timeout = 0 )
                           XRD_WARN_UNUSED_RESULT;
 
+
+      //------------------------------------------------------------------------
+      //! Performs a custom operation on an open file, server implementation
+      //! dependent - async
+      //!
+      //! @param queryCode query code
+      //! @param arg       query argument
+      //! @param handler   handler to be notified when the response arrives,
+      //!                  the response parameter will hold a Buffer object
+      //!                  if the procedure is successful
+      //! @param timeout   timeout value, if 0 the environment default will
+      //!                  be used
+      //! @return          status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus Fcntl( QueryCode::Code  queryCode,
+                          const Buffer    &arg,
+                          ResponseHandler *handler,
+                          time_t           timeout = 0 )
+                          XRD_WARN_UNUSED_RESULT;
+
+      //------------------------------------------------------------------------
+      //! Performs a custom operation on an open file, server implementation
+      //! dependent - sync
+      //!
+      //! @param queryCode query code
+      //! @param arg       query argument
+      //! @param response  the response (to be deleted by the user)
+      //! @param timeout   timeout value, if 0 the environment default will
+      //!                  be used
+      //! @return          status of the operation
+      //------------------------------------------------------------------------
+      XRootDStatus Fcntl( QueryCode::Code   queryCode,
+                          const Buffer     &arg,
+                          Buffer          *&response,
+                          time_t            timeout = 0 )
+                          XRD_WARN_UNUSED_RESULT;
       //------------------------------------------------------------------------
       //! Get access token to a file - async
       //!
@@ -796,6 +956,14 @@ namespace XrdCl
       friend class ChkptWrtVImpl;
 
       //------------------------------------------------------------------------
+      //! Helper to Initialise Plugin
+      //!
+      //! @param url     url of the file to intialise the plugin for
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      void InitPlugin( const std::string &url);
+
+      //------------------------------------------------------------------------
       //! Create a checkpoint - async
       //!
       //! @param handler : handler to be notified when the response arrives,
@@ -844,10 +1012,47 @@ namespace XrdCl
                               ResponseHandler    *handler,
                               time_t              timeout = 0 );
 
+      std::unique_ptr<ExportedFileTemplate> GetFileTemplate() const;
+
       FileImpl   *pImpl;
       FilePlugIn *pPlugIn;
       bool        pEnablePlugIns;
   };
+
+  struct CloneLocation
+  {
+    std::unique_ptr<ExportedFileTemplate> file;
+    off_t srcOffs;
+    off_t srcLen;
+    off_t dstOffs;
+  };
+
+  struct CloneLocations
+  {
+    //--------------------------------------------------------------------------
+    //! Adds a clone location to the CloneLocations object
+    //!
+    //! @param file    : a file object to use as the source
+    //!                  it should be already open for reading and remain so until
+    //!                  after the Clone() call
+    //! @param dstOffs : offset to start clone range in the destination file
+    //! @param srcOffs : offset to start fetching clone range in the source
+    //! @param srcLen  : length of range to clone
+    //!
+    //--------------------------------------------------------------------------
+    void Add(const File &file, off_t dstOffs, off_t srcOffs, off_t srcLen)
+    {
+      CloneLocation loc;
+      loc.srcOffs = srcOffs;
+      loc.dstOffs = dstOffs;
+      loc.srcLen = srcLen;
+      loc.file = file.GetFileTemplate();
+      locations.emplace_back(std::move(loc));
+    }
+
+    std::vector<CloneLocation> locations;
+  };
+
 }
 
 #endif // __XRD_CL_FILE_HH__

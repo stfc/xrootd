@@ -27,9 +27,11 @@
 #include "XrdSys/XrdSysTimer.hh"
 #include "XrdOss/XrdOss.hh"
 #include "XrdOuc/XrdOucEnv.hh"
+#include "XrdOuc/XrdOucJson.hh"
 #include "XrdSfs/XrdSfsInterface.hh"
 
 #include "XrdCl/XrdClURL.hh"
+#include "XrdCl/XrdClFileStateHandler.hh"
 
 #include <cassert>
 #include <cstdio>
@@ -138,7 +140,7 @@ void File::Close()
 
 //------------------------------------------------------------------------------
 
-File* File::FileOpen(const std::string &path, long long offset, long long fileSize, XrdOucCacheIO* inputIO)
+File* File::FileOpen(const std::string &path, long long offset, long long fileSize, XrdOucCacheIO *inputIO)
 {
    File *file = new File(path, offset, fileSize);
    if ( ! file->Open(inputIO))
@@ -423,7 +425,7 @@ void File::RemoveIO(IO *io)
 
 //------------------------------------------------------------------------------
 
-bool File::Open(XrdOucCacheIO* inputIO)
+bool File::Open(XrdOucCacheIO *inputIO)
 {
    // Sets errno accordingly.
 
@@ -507,7 +509,9 @@ bool File::Open(XrdOucCacheIO* inputIO)
          TRACEF(Warning, tpfx << "Basic sanity checks on data file failed, resetting info file, truncating data file.");
          m_cfi.ResetAllAccessStats();
          m_data_file->Ftruncate(0);
-         Cache::ResMon().register_file_purge(m_filename, data_stat.st_blocks);
+         // data-file might not have existed at entry -- data_stat is then undefined
+         if (data_existed)
+            Cache::ResMon().register_file_purge(m_filename, data_stat.st_blocks);
       }
    }
 
@@ -520,6 +524,7 @@ bool File::Open(XrdOucCacheIO* inputIO)
          initialize_info_file = true;
          m_cfi.ResetAllAccessStats();
          m_data_file->Ftruncate(0);
+         // data-file is known to exist due to checks in the previous if block
          Cache::ResMon().register_file_purge(m_filename, data_stat.st_blocks);
       } else {
          // TODO: If the file is complete, we don't need to reset net cksums.
@@ -543,8 +548,34 @@ bool File::Open(XrdOucCacheIO* inputIO)
       m_cfi.Write(m_info_file, ifn.c_str());
       m_info_file->Fsync();
       cache()->WriteFileSizeXAttr(m_info_file->getFD(), m_file_size);
-      TRACEF(Debug, tpfx << "Creating new file info, data size = " <<  m_file_size << " num blocks = "  << m_cfi.GetNBlocks()
-                         << " block size = " << pfc_blocksize);
+
+      if (cache()->RefConfiguration().m_httpcc)
+      {
+         std::string  responseFctl;
+         int resFctl = inputIO->Fcntl(XrdOucCacheOp::Code::QFinfo, "head", responseFctl);
+         if (resFctl == 0)
+         {
+            std::string cc_str = responseFctl;
+            nlohmann::json cc_json =  nlohmann::json::parse(cc_str);
+            if (cc_json.contains("max-age"))
+            {
+               time_t ma = cc_json["max-age"];
+               ma += time(NULL);
+               cc_json["expire"] = ma;
+               cc_str = cc_json.dump();
+            }
+            TRACE(Error, "GetFile() XrdCl::File::Fcntl value " << cc_str);
+            cache()->WriteCacheControlXAttr(m_info_file->getFD(), nullptr, cc_str);
+         }
+         else if (resFctl != kXR_Unsupported)
+         {
+            TRACE(Error, "GetFile() XrdCl::File::Fcntl query XrdCl::QueryCode::FInfo failed " << inputIO->Path());
+         }
+      }
+
+      TRACEF(Debug, tpfx << "Creating new file info, data size = " <<  m_file_size << 
+                            " num blocks = "  << m_cfi.GetNBlocks() <<
+                            " block size = " << pfc_blocksize);
    }
    else
    {

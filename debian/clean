@@ -1,3 +1,2 @@
 doxydoc/
-bindings/python/docs/build/
-debian/libxrootd-private-dev.install
+python/docs/build/

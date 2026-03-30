@@ -1,4 +1,5 @@
-
+#ifndef XRD_HTTP_TPC_TPC_HH
+#define XRD_HTTP_TPC_TPC_HH
 #include <memory>
 #include <string>
 #include <vector>
@@ -13,6 +14,7 @@
 #include "XrdHttpTpcPMarkManager.hh"
 
 #include <curl/curl.h>
+#include <openssl/ssl.h>
 
 class XrdOucErrInfo;
 class XrdOucStream;
@@ -61,6 +63,8 @@ private:
                                    struct curl_sockaddr *address);
 
     static int closesocket_callback(void *clientp, curl_socket_t fd);
+    static int ssl_ctx_callback(CURL *curl, void *ssl_ctx, void *clientp);
+    static int verify_callback(int preverify_ok, X509_STORE_CTX* ctx);
 
     struct TPCLogRecord {
 
@@ -105,10 +109,10 @@ private:
                       int openMode, const XrdSecEntity &sec,
                       const std::string &authz);
 
-    int DetermineXferSize(CURL *curl, XrdHttpExtReq &req, TPC::State &state,
-                          bool &success, TPCLogRecord &, bool shouldReturnErrorToClient = true);
+    int PerformHEADRequest(CURL *curl, XrdHttpExtReq &req, TPC::State &state,
+                           bool &success, TPCLogRecord &rec, bool shouldReturnErrorToClient = true);
 
-    int GetContentLengthTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t & contentLength, bool & success, TPCLogRecord &rec);
+    int GetRemoteFileInfoTPCPull(CURL *curl, XrdHttpExtReq &req, uint64_t & contentLength, std::map<std::string,std::string> & reprDigest, bool & success, TPCLogRecord &rec);
 
     // Send a 'performance marker' back to the TPC client, informing it of our
     // progress.  The TPC client will use this information to determine whether
@@ -146,6 +150,19 @@ private:
 
     std::string prepareURL(XrdHttpExtReq &req);
 
+    /**
+     * Returns true if
+     *   - there is a match between the client-provided checksum type AND value and the passive-server returned checksum type AND value
+     * Returns false if
+     *   - the client-provided digest type is not found in the passive-server provided digest type or
+     *   - the client-provided digest value associated to the type  matches the one returned by the passive-server
+     * @param passiveSrvReprDigest the passive-server provided Repr-Digest
+     * @param req the request allowing to get the client-provided Repr-Digest and return an error message to it in case of mismatch
+     * @param rec the logging object for logging in case of mismatch
+     * @return true or false depending on the above
+     */
+    bool mismatchReprDigest(const std::map<std::string,std::string> & passiveSrvReprDigest, XrdHttpExtReq & req, TPCLogRecord &rec);
+
     static int m_marker_period;
     static size_t m_block_size;
     static size_t m_small_block_size;
@@ -170,6 +187,8 @@ private:
 
     bool usingEC; // indicate if XrdEC is used
 
+    static bool allowMissingCRL;
+
     // Time to connect the curl socket to the remote server uses the linux's default value
     // of 60 seconds
     static const long CONNECT_TIMEOUT = 60;
@@ -178,3 +197,4 @@ private:
     std::map<std::string,std::string> hdr2cgimap;
 };
 }
+#endif

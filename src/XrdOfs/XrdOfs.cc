@@ -479,6 +479,7 @@ int XrdOfsFile::open(const char          *path,      // In
                         SFS_O_NOTPC  - Disallow TPC opens
                         SFS_O_REPLICA- Open file for replication
                         SFS_O_CREAT  - Create the file open in RW mode
+                        SFS_O_CREATAT- As above but with colocation.
                         SFS_O_TRUNC  - Trunc  the file open in RW mode
                         SFS_O_POSC   - Presist    file on successful close
                         SFS_O_SEQIO  - Primarily sequential I/O (e.g. xrdcp)
@@ -637,6 +638,10 @@ int XrdOfsFile::open(const char          *path,      // In
               return XrdOfsFS->Emsg(epname, error, oP.poscNum, "pcreate", path,
                      "+ofs_open: failed to enter file into posc queue");
           }
+
+       // If placement information is present provide a hint to the oss plugin
+       //
+       if ((open_mode & ~SFS_O_CREAT) & SFS_O_CREATAT) crOpts |= XRDOSS_coloc;
 
        // Create the file. If ENOTSUP is returned, promote the creation to
        // the subsequent open. This is to accomodate proxy support.
@@ -819,6 +824,48 @@ int XrdOfsFile::open(const char          *path,      // In
 //
    XrdOfsFS->ocMutex.Lock(); oh = oP.hP; XrdOfsFS->ocMutex.UnLock();
    return oP.OK();
+}
+
+/******************************************************************************/
+/*                                 C l o n e                                  */
+/******************************************************************************/
+/*
+  Function: Clone the file object from another file object.
+
+  Input:    n/a
+
+  Output:   Returns SFS_OK upon success and SFS_ERROR upon failure.
+*/
+
+int XrdOfsFile::Clone(XrdSfsFile& srcFile)
+{
+   EPNAME("Clone");
+   XrdOfsFile& ofsFile = static_cast<XrdOfsFile&>(srcFile);
+   int rc = oh->Select().Clone(ofsFile.oh->Select());
+
+   if (rc < 0)
+      {char etxt[4096];
+       snprintf(etxt,sizeof(etxt),"%s from %s",oh->Name(),ofsFile.oh->Name()); 
+       return XrdOfsFS->Emsg(epname, error, rc, "clone", etxt);
+      }
+
+   return SFS_OK;
+}
+  
+/******************************************************************************/
+
+int XrdOfsFile::Clone(const std::vector<XrdOucCloneSeg> &cVec)
+{
+   EPNAME("Clone");
+   int rc = oh->Select().Clone(cVec);
+
+   if (rc < 0)
+      {char etxt[4096];
+       snprintf(etxt,sizeof(etxt),"%s from file ranges",oh->Name());
+       return XrdOfsFS->Emsg(epname, error, rc, "clone", etxt);
+      }
+
+  return SFS_OK;
 }
 
 /******************************************************************************/
@@ -1089,9 +1136,30 @@ int            XrdOfsFile::fctl(const int               cmd,
 int XrdOfsFile::fctl(const int cmd, int alen, const char *args,
                      const XrdSecEntity *client)
 {                             // 12345678901234
+   EPNAME("fctl");
    static const char *fctlArg = "ofs.tpc cancel";
    static const int   fctlAsz = 15;
 
+// For QFINFO we simply pass it to the Oss layer
+//
+   if (cmd == SFS_FCTL_QFINFO)
+      {char* resp = 0;;
+       int rc = oh->Select().Fctl(XrdOssDF::Fctl_QFinfo, alen, args, &resp); 
+       if (rc < 0)
+          {if (resp) delete[] resp;
+           return XrdOfsFS->Emsg(epname,error,rc,"fctl",oh,false,false);
+          }
+       if (resp)
+          {if ((rc = strlen(resp)))
+              {error.setErrInfo(rc, resp);
+               delete[] resp;
+               return SFS_DATA;
+              }
+           delete[] resp;
+          }
+       return SFS_OK;
+      }
+       
 // See if the is a tpc cancellation (the only thing we support here)
 //
    if (cmd != SFS_FCTL_SPEC1 || !args || alen < fctlAsz || strcmp(fctlArg,args))
@@ -2600,6 +2668,9 @@ int XrdOfs::Emsg(const char    *pfx,    // Message prefix value
    buffer = einfo.getMsgBuff(buflen);
    std::string eText;
 
+   // Translate ecode to corresponding errno
+   int rcode = OfsEroute.ec2errno(ecode);
+
 // Check for extended information
 //
     if (xtra)
@@ -2607,14 +2678,14 @@ int XrdOfs::Emsg(const char    *pfx,    // Message prefix value
              {case '?': xtra = 0;
                         if (XrdOfsFS->tryXERT && XrdOfsOss->getErrMsg(eText))
                            {if (eText.find("Unable") != std::string::npos)
-                               {einfo.setErrInfo(ecode, eText.c_str());
+                               {einfo.setErrInfo(rcode, eText.c_str());
                                 msgDone = true;
                                } else xtra = eText.c_str();
                            }
                         break;
               case '+': xtra++;
                         break;
-              default:  einfo.setErrInfo(ecode, xtra);
+              default:  einfo.setErrInfo(rcode, xtra);
                         msgDone = true;
                         break;
              }
@@ -2623,7 +2694,7 @@ int XrdOfs::Emsg(const char    *pfx,    // Message prefix value
 //
    if (!msgDone)
       {XrdOucERoute::Format(buffer, buflen, ecode, op, target, xtra);
-       einfo.setErrCode(ecode);
+       einfo.setErrCode(rcode);
       }
 
 // Print it out
