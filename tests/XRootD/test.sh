@@ -58,8 +58,8 @@ export XRD_LOGLEVEL XRD_LOGFILE
 # Reduce default timeouts to catch errors quickly and prevent the test
 # suite from getting stuck waiting for timeouts while running.
 
-: "${XRD_REQUESTTIMEOUT:=10}"
-: "${XRD_STREAMTIMEOUT:=5}"
+: "${XRD_REQUESTTIMEOUT:=15}"
+: "${XRD_STREAMTIMEOUT:=10}"
 : "${XRD_TIMEOUTRESOLUTION:=1}"
 
 export XRD_REQUESTTIMEOUT XRD_STREAMTIMEOUT XRD_TIMEOUTRESOLUTION
@@ -115,7 +115,7 @@ test -r "${SCRIPT}" || error "test script not found"
 source  "${SCRIPT}" || error "failed to source ${SCRIPT}"
 
 function printlogs() {
-	tail -n "${MAXLINES:-20}" "${NAME}"/*.log 1>&2
+	tail -n "${MAXLINES:-50}" "${NAME}"/*.log 1>&2
 }
 
 function setup() {

@@ -6,6 +6,127 @@ Release Notes
 =============
 
 -------------
+Version 5.9.2
+-------------
+
++ **Major bug fixes**
+  **[cmsd]** Clear ident field when reusing a request object to avoid segv
+  **[Server]** Correct relative path check when directory is implied
+  **[XrdCl]** Fix a possible deadlock in extreme copy (#2619, #2622)
+  **[XrdCl]** Fix crashes observed with Clang in Release builds
+  **[XrdCl]** Fix segfault in XCpCtx::WeakestLink() (#2659)
+  **[XrdHttp]** Fix a null byte buffer overflow when parsing %-encoded strings (#2690)
+  **[XrdHttp]** Fix a null byte overflow in parseURL in HttpUtils (#2689)
+  **[XrdHttp]** Fix buffer overflow issues when parsing HTTP request lines (#2691)
+  **[XrdHttp]** Prevent a buffer overflow when handling a large Host header (#2692)
+  **[XrdThrottle]** Fix null pointer dereference in ThrottleManager
+  **[XrdXrootd]** Use correct format specifier when printing out monitoring report (#2741)
+
++ **Minor bug fixes**
+  **[Bridge]** Fix Bridge re-drive being invoked after protocol is Reset (#2602, #2613)
+  **[Monitoring]** Do not emit XML header if only JSON is to be emitted
+  **[Python]** Fix XRootD glob to preserve URL parameters for authentication (#2634)
+  **[XrdCl]** Correct digest index when receiving pgread response out of order
+  **[XrdCl]** Fix help message display in xrdfs help
+  **[XrdCl]** Make sure outgoing message still valid on retry (#2646)
+  **[XrdCl]** Set errno on zero return from read/readv
+  **[XrdNet]** Use a pre-allocated buffer to store host/domain names (#2452)
+  **[XrdPfc]** Fix uninitialized value passing into resource-monitor purge queue (#2679)
+  **[XrdSys]** Fix FDs leaked in constructors when logging to stderr (#2715)
+  **[XrdSys]** Make sure a mutex is unlocked before destruction
+  **[XrdVoms]** provide compatibility for timespec on macOS/NetBSD (#2680)
+  **[Xrd]** More support for external closing of Link (#2226, #2653)
+  **[Xrd]** Wait for threads that issue eventfd (#2602, #2623)
+  **[XrdXrootd]** Make sure aio multipath response uses right path and streamId (#2658)
+
++ **Miscellaneous**
+  **[CI]** Fix GitLab CI builds when build directory is reused
+  **[CI]** Use auditwheel to repair XRootD Python binary wheels (#2495)
+  **[CMake]** Link XrdVoms plugin with XrdUtils and OpenSSL
+  **[Tests]** Add initial tests with Kerberos authentication (#2643)
+  **[Tests]** Add initial tests with X509 certificate authentication (#2644)
+  **[XrdCeph]** Link modules against XrdUtils/XrdServer as needed
+  **[XrdHttp]** Avoid copying strings when handling MOVE requests (#2726)
+  **[Xrd]** Set X509_CERT_DIR and X509_CERT_FILE if not already set
+  **[XrdSys]** PollKQ (for macOS) remove active poll filters during Exclude
+
+-------------
+Version 5.9.1
+-------------
+
++ **Major bug fixes**
+  **[XrdCl]** Revert fix for #2578 which caused deadlocks in XCache (#2629, #2633)
+  **[XrdEc]** Fix stack smashing detected by ASAN
+  **[XrdSecsss]** Fix buffer overrun when decoding bad sss keys
+
++ **Minor bug fixes**
+  **[XrdCl]** Avoid possibly losing error message during copy (#2615)
+  **[XrdCl]** Fix concurrency bug causing AtLeast policy to miss errors
+  **[XrdMacaroons]** Ensure that subdirectory creation permission is implied (#2611, #2638)
+  **[XrdMacaroons]** Match by subdirectory instead of substring for permission verification
+  **[XrdOuc]** Correct is_subdirectory check for directories ending with a trailing /
+  **[XrdPfc]** Add missing includes and put C++ headers before C headers
+  **[XrdThrottle]** Fix ignored configuration variable (#2616)
+  **[XrdXrootd]** Fix readv requests of exactly 2GB max allowed limit (#2614)
+
++ **Miscellaneous**
+  **[CI]** Add ABI compatibility check to GitHub Actions
+  **[CI]** Move coverage build to latest Ubuntu in GitHub Actions
+  **[CI]** Update macOS runner images after deprecation of macOS 13
+  **[Misc]** Fix -Wmaybe-uninitialized compiler warnings
+  **[Misc]** Fix spelling errors found by lintian (#2617)
+  **[RPM]** Revert back to sysusers.d config file, needed in Fedora 43 (#2433)
+  **[Systemd]** Restart services on abnormal exit (#2641)
+  **[XrdHttp]** Further improvements to WebDAV error message handling (#2261, #2598)
+  **[XrdThrottle]** Update README to Markdown and cover existing config
+
+-------------
+Version 5.9.0
+-------------
+
++ **New Features**
+  **[Server]** Implement udprefresh option for the xrd.network directive (#1873)
+  **[Server]** New redirect intercept plugin for SENSE
+  **[XrdCors]** Add CORS plugin to XrdHttp (#2541, #2552)
+  **[XrdHttp]** Make HTTP's maximum open delay configurable via http.maxdelay option (#2532)
+  **[XrdNet]** XRootD monitoring information now follows DNS changes (#1873)
+  **[XrdPfc]** Implement URL CGI parameters for setting block-size and max number of blocks for prefetching on per file basis (#2606)
+  **[XrdTls]** Allow disabling of X.509 client auth (#2269)
+
++ **Major bug fixes**
+  **[XrdCl]** Avoid poller callbacks blocking each other (#2578, #2582)
+  **[XrdCl]** Fix URL object lifetime issue causing XCache crash (#2587, #2599)
+  **[XrdSsi]** Fix XrdSsi server crash due to use after free (#2479, #2481, #2523)
+  **[XrdSys]** Fix a race condition in IOEvents that might cause segfault
+  **[XrdCl]** Fix xrdcp crash when running with record plugin enabled (#2579)
+  **[XrdPfc]** Fix deadlock when opening/closing many files concurrently (#2561, #2563)
+
++ **Minor bug fixes**
+  **[Server]** Make sure tread create counter increases monotonically (#2597)
+  **[XrdCl]** PollerBuiltIn, proection against adding socket during shutdown
+  **[XrdHttp]** Do a clean TLS shutdown for HTTPS (#2565)
+  **[XrdHttp]** Fix file renaming with token authentication after redirection (#2550, #2570)
+  **[XrdHttpTpc]** Improve mapping of error codes to HTTP status in TPC transfers (#2591)
+  **[XrdOssCsi]** Handle pathnames not starting with slash and allow access to FD (#2581, #2594)
+  **[XrdOss]** Workaround Mac OS X pecularity with RLIMIT_NOFILE (#2577)
+  **[XrdOuc]** Fix memory leak in XrdOucGatherConf (#2583)
+  **[XrdPfc]** Return error code for set cache evict if the file does not exist (#2608)
+  **[XrdPosix]** Add a missed file object unlock
+  **[XrdPosix]** Set errno for errors from pgRead and pgWrite
+  **[XrdXrootd]** Fix multi-stream copy with xrdcp through XCache (#2592, #2593)
+
++ **Miscellaneous**
+  **[CMake]** Downgrade -Werror=null-dereference back to just a warning (#2571)
+  **[Tests]** Add an xcache test, using OssCsi to flag corruption
+  **[Tests]** Extend test suite with more tests with token based authentication
+  **[XrdHttp]** Set the sequential I/O flag for simple HTTP requests
+  **[XrdOssStats]** Add documentation for the OSS statistics plugin
+  **[XrdPfc]** Cleanup processing and storage of pfc.dirstats configuration parameters
+  **[XrdPfc]** Pass full environment into the OSS library loader
+  **[XrdThrottle]** Modify XrdThrottle to be an OSS plugin (#2521)
+  **[XrdThrottle]** Re-engineered concurrency limits (#2521)
+
+-------------
 Version 5.8.4
 -------------
 

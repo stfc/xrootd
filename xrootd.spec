@@ -16,11 +16,11 @@ License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AN
 URL:		https://xrootd.org
 
 %if !%{with git}
-Version:	5.8.4
+Version:	5.9.2
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
-%define src_version %(sed -e "s/%%(describe)/v5.8-rc%(date +%%Y%%m%%d)/" <<< "%git_version")
+%define src_version %(sed -e "s/%%(describe)/v5.9-rc%(date +%%Y%%m%%d)/" <<< "%git_version")
 %define rpm_version %(sed -e 's/v//; s/-rc/~rc/; s/-g/+git/; s/-/.post/; s/-/./' <<< "%src_version")
 Version:	%rpm_version
 Source0:	%{name}.tar.gz
@@ -84,6 +84,8 @@ BuildRequires:	coreutils
 BuildRequires:	curl
 BuildRequires:	davix
 BuildRequires:	gtest-devel
+BuildRequires:	krb5-server
+BuildRequires:	krb5-workstation
 BuildRequires:	openssl
 BuildRequires:	procps-ng
 %endif
@@ -117,7 +119,7 @@ Requires:	%{name}-client%{?_isa} = %{epoch}:%{version}-%{release}
 Requires:	%{name}-server-libs%{?_isa} = %{epoch}:%{version}-%{release}
 Requires:	expect
 Requires:	logrotate
-Requires(pre): shadow-utils
+%{?sysusers_requires_compat}
 %{?systemd_requires}
 
 %description server
@@ -391,6 +393,9 @@ install -m 644 packaging/common/frm_purged@.service %{buildroot}%{_unitdir}
 mkdir -p %{buildroot}%{_tmpfilesdir}
 install -m 644 packaging/rhel/xrootd.tmpfiles %{buildroot}%{_tmpfilesdir}/%{name}.conf
 
+mkdir -p %{buildroot}%{_sysusersdir}
+install -m 644 packaging/rhel/%{name}-sysusers.conf %{buildroot}%{_sysusersdir}/%{name}.conf
+
 # Server config
 mkdir -p %{buildroot}%{_sysconfdir}/%{name}
 install -m 644 -p packaging/common/%{name}-clustered.cfg \
@@ -452,9 +457,7 @@ install -m 644 -p packaging/common/%{name}.pp \
 %ldconfig_scriptlets server-libs
 
 %pre server
-getent group %{name} >/dev/null || groupadd -r %{name}
-getent passwd %{name} >/dev/null || useradd -r -g %{name} -s /sbin/nologin \
-	-d %{_localstatedir}/spool/%{name} -c "System user for XRootD" %{name}
+%sysusers_create_compat %(tar -z -x -f %{SOURCE0} --no-anchored xrootd-sysusers.conf -O > /tmp/xrootd-sysusers.conf && echo /tmp/xrootd-sysusers.conf)
 
 %post server
 %tmpfiles_create %{_tmpfilesdir}/%{name}.conf
@@ -522,6 +525,7 @@ fi
 %{_datadir}/%{name}/utils
 %{_unitdir}/*
 %{_tmpfilesdir}/%{name}.conf
+%{_sysusersdir}/%{name}.conf
 %config(noreplace) %{_sysconfdir}/logrotate.d/%{name}
 %dir %{_sysconfdir}/%{name}/config.d
 %attr(-,xrootd,xrootd) %config(noreplace) %{_sysconfdir}/%{name}/*.cfg
@@ -614,6 +618,7 @@ fi
 %{_libdir}/libXrdFileCache-5.so
 %{_libdir}/libXrdHttp-5.so
 %{_libdir}/libXrdHttpTPC-5.so
+%{_libdir}/libXrdHttpCors-5.so
 %{_libdir}/libXrdMacaroons-5.so
 %{_libdir}/libXrdN2No2p-5.so
 %{_libdir}/libXrdOfsPrepGPI-5.so
@@ -702,6 +707,15 @@ fi
 %endif
 
 %changelog
+
+* Fri Mar 27 2026 Guilherme Amadio <amadio@cern.ch> - 1:5.9.2-1
+- XRootD 5.9.2
+
+* Mon Nov 17 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.9.1-1
+- XRootD 5.9.1
+
+* Sat Oct 04 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.9.0-1
+- XRootD 5.9.0
 
 * Thu Jul 10 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.8.4-1
 - XRootD 5.8.4
@@ -839,4 +853,4 @@ fi
 * Mon Apr 11 2011 Lukasz Janyst <ljanyst@cern.ch> 3.0.3-1
 - the first RPM release - version 3.0.3
 - the detailed release notes are available at:
-  http://xrootd.org/download/ReleaseNotes.html
+  https://xrootd.org/download/ReleaseNotes.html

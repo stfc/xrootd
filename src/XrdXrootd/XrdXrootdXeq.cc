@@ -29,6 +29,7 @@
 
 #include <cctype>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <sys/time.h>
 
@@ -63,6 +64,7 @@
 #include "XrdXrootd/XrdXrootdPio.hh"
 #include "XrdXrootd/XrdXrootdPrepare.hh"
 #include "XrdXrootd/XrdXrootdProtocol.hh"
+#include "XrdXrootd/XrdXrootdRedirPI.hh"
 #include "XrdXrootd/XrdXrootdStats.hh"
 #include "XrdXrootd/XrdXrootdTrace.hh"
 #include "XrdXrootd/XrdXrootdWVInfo.hh"
@@ -327,7 +329,9 @@ int XrdXrootdProtocol::do_Bind()
    free(cp);
    CapVer = pp->CapVer;
    Status = XRD_BOUNDPATH;
+   boundRecycle = new XrdSysSemaphore(0);
    clientPV = pp->clientPV;
+   XrdLinkCtl::RegisterCloseRequestCb(Link, this, &CloseRequestCb, (void*)this);
 
 // Check if we need to enable packet marking for this stream
 //
@@ -2412,13 +2416,24 @@ int XrdXrootdProtocol::do_Read()
         &&  IO.Offset+IO.IOLen <= IO.File->Stats.fSize+as_seghalf
         &&  linkAioReq < as_maxperlnk && srvrAioOps < as_maxpersrv)
            {XrdXrootdProtocol *pP;
-            XrdXrootdNormAio  *aioP;
+            XrdXrootdNormAio  *aioP=0;
 
             if (!pathID) pP = this;
                else {if (!(pP = VerifyStream(retc, pathID, false))) return retc;
                      if (pP->linkAioReq >= as_maxperlnk) pP = 0;
                     }
-            if (pP && (aioP = XrdXrootdNormAio::Alloc(pP,pP->Response,IO.File)))
+            if (pP)
+               {// Use of TmpRsp here is to avoid modying pP. It is built
+                // to contain the correct streamid for this request and the
+                // right Link for the pathID. It's used by Alloc to call
+                // XrdXrootdAioTask::Init which in turn makes a copy of TmpRsp
+                // to its own response object and also keeps the Link pointer.
+                XrdXrootdResponse TmpRsp;
+                TmpRsp = Response;
+                TmpRsp.Set(pP->Link);
+                aioP = XrdXrootdNormAio::Alloc(pP,TmpRsp,IO.File);
+               }
+            if (aioP)
                {if (!IO.File->aioFob) IO.File->aioFob = new XrdXrootdAioFob;
                 aioP->Read(IO.Offset, IO.IOLen);
                 return 0;
@@ -2616,14 +2631,14 @@ int XrdXrootdProtocol::do_ReadV()
 
 // We limit the total size of the read to be 2GB for convenience
 //
-   if (totSZ > 0x7fffffffLL)
+   if (totSZ > 0x80000000LL)
       return Response.Send(kXR_NoMemory, "Total readv transfer is too large");
 
 // Calculate the transfer unit which will be the smaller of the maximum
 // transfer unit and the actual amount we need to transfer.
 //
-   if ((Quantum = static_cast<int>(totSZ)) > maxTransz) Quantum = maxTransz;
-   
+   Quantum = totSZ < maxTransz ? totSZ : maxTransz;
+
 // Now obtain the right size buffer
 //
    if ((Quantum < halfBSize && Quantum > 1024) || Quantum > argp->bsize)
@@ -3741,7 +3756,9 @@ int XrdXrootdProtocol::fsError(int rc, char opC, XrdOucErrInfo &myError,
                                   << eMsg <<':' <<ecode);
                    }
           }
-       rs = Response.Send(kXR_redirect, ecode, eMsg, myError.getErrTextLen());
+       if (RedirPI) rs = fsRedirPI(eMsg, ecode, myError.getErrTextLen());
+          else rs = Response.Send(kXR_redirect, ecode, eMsg,
+                                  myError.getErrTextLen());
        if (myError.extData()) myError.Reset();
        return rs;
       }
@@ -3945,6 +3962,153 @@ int XrdXrootdProtocol::fsRedirNoEnt(const char *eMsg, char *Cgi, int popt)
 }
 
 /******************************************************************************/
+/*                             f s R e d i r I P                              */
+/******************************************************************************/
+
+namespace XrdXrootd
+{
+   struct netInfo
+         {XrdNetAddr   netAddr;
+          XrdSysMutex  niMutex;
+          char*        netID;
+          time_t       expTime = 0;
+          RAtomic_uint refs = {0};
+
+          netInfo(const char*id) : netID(strdup(id)) {} 
+         ~netInfo() {if (netID) free(netID);}
+         };
+}
+
+XrdXrootd::netInfo* XrdXrootdProtocol::fsRedirIP(const char *netID, int port)
+{
+   auto cmpchr = [](const char* a, const char* b) {return strcmp(a,b)<0;};
+   static std::map<const char*,XrdXrootd::netInfo*,decltype(cmpchr)> niMap(cmpchr);
+   static XrdSysMutex niMapMtx;
+
+   XrdXrootd::netInfo* niP;
+
+// First, chek if we have an entry for this item. We need a lock because
+// some oher thread may be adding a node to the map. Nodes are never deleted.
+//
+   niMapMtx.Lock();
+   auto it = niMap.find(netID);
+   if (it == niMap.end())
+      {niP = new XrdXrootd::netInfo(netID);
+       niMap[niP->netID] = niP;
+      } else niP = it->second;
+    niMapMtx.UnLock();
+    niP->niMutex.Lock();
+
+// Validate/initialize the corresponding netaddr object. For newly allocated
+// objects it is always done. For pre-exiting objects only when they expire.
+// Note: when expTime is zero then refs must be 1 and this is a 1st time init,
+//
+   time_t nowT = time(0);
+   niP->refs++;
+   if (niP->expTime <= nowT && niP->refs == 1)
+      {const char* eTxt = niP->netAddr.Set(netID, port);
+       if (eTxt)
+          {if (niP->expTime == 0)
+              {eDest.Emsg("RedirIP", "Unable to init NetInfo for", netID, eTxt);
+               niP->refs--;
+               niP->niMutex.UnLock();
+               return 0;
+              }
+           eDest.Emsg("RedirIP", "Unable to refresh NetInfo for", netID, eTxt);
+           niP->expTime += 60;
+          } else niP->expTime = nowT + redirIPHold;
+      }
+
+// We have valid network info on the target
+//
+   niP->niMutex.UnLock();
+   return niP;
+}
+
+/******************************************************************************/
+/*                             f s R e d i r P I                              */
+/******************************************************************************/
+
+int XrdXrootdProtocol::fsRedirPI(const char *trg, int port, int trglen)
+{
+   struct THandle
+         {XrdXrootd::netInfo* Info;
+                     THandle() : Info(0) {}
+                    ~THandle() {if (Info) Info->refs--;}
+         }       T;
+   std::string   Target;
+   int newPort = port;
+
+// Handle the most comman case first - a simple host and port.
+//
+   if (port >= 0)
+      {std::string TDst;
+       const char* TCgi = index(trg, '?');
+       if (!TCgi)  {TCgi = ""; TDst = trg;}
+          else TDst.assign(trg, TCgi-trg);
+       T.Info = fsRedirIP(TDst.c_str(), port);
+       if (!T.Info) return Response.Send(kXR_redirect, port, trg, trglen);
+       uint16_t TPort = static_cast<uint16_t>(newPort);
+       Target = RedirPI->Redirect(TDst.c_str(), TPort, TCgi, T.Info->netAddr,
+                                 *(Link->AddrInfo()));
+       newPort = static_cast<int>(TPort);
+      } else {
+
+// This is a url which requires additional handling. If the url is not
+// valid we skip calling the plugin as the situation is not salvageable
+// and the client will complain. We also require that the host and optional
+// port be atleast two characters long.
+//
+       std::string urlHead, TDst, urlPort;
+       const char* urlTail;
+       const char* hBeg = strstr(trg, "://");
+       if (!hBeg)
+          {eDest.Emsg("RedirPI", "Invalid redirect URL -", trg);
+           return Response.Send(kXR_redirect, port, trg, trglen);
+          }
+       hBeg += 3;
+       urlHead.assign(trg, hBeg-trg);
+       urlTail = strstr(hBeg, "/");
+       if (!urlTail) {urlTail = ""; TDst = hBeg;}
+          else {if (urlTail-hBeg < 3)
+                   {eDest.Emsg("RedirPI", "Mlalformed URL -", trg);
+                    return Response.Send(kXR_redirect, port, trg, trglen);
+                   }
+                TDst.assign(hBeg, urlTail-hBeg);
+               }
+       T.Info = fsRedirIP(TDst.c_str(), port);
+       if (!T.Info) return Response.Send(kXR_redirect, port, trg, trglen);
+       size_t colon = TDst.find(":");
+       if (colon != std::string::npos)
+          {urlPort.assign(TDst, colon+1, std::string::npos); 
+           TDst.erase(colon);
+          }
+       Target = RedirPI->RedirectURL(urlHead.c_str(), Target.c_str(),
+                                     urlPort.c_str(), urlTail, newPort,
+                                     T.Info->netAddr, *(Link->AddrInfo()));
+       if (port == -1 || newPort >= 0) newPort = port;
+      }
+
+// Handle the result of calling the plugin
+//
+   if (!Target.size()) return Response.Send(kXR_redirect, port, trg, trglen);
+
+   if (Target.front() != '!')
+      {TRACEI(REDIR, Response.ID() <<"plugin redirects to "
+                                   <<Target.c_str() <<" portarg="<<newPort);
+
+       return Response.Send(kXR_redirect,port,Target.c_str(),Target.size());
+      }
+
+// The redirect plgin enountered an error, so we bail.
+//
+   char mbuff[1024];
+   snprintf(mbuff,sizeof(mbuff),"Redirect failed; %s",Target.c_str());
+   eDest.Emsg("Xeq_RedirPI", mbuff);
+   return Response.Send(kXR_ServerError, mbuff);
+}
+  
+/******************************************************************************/
 /*                               g e t B u f f                                */
 /******************************************************************************/
   
@@ -4146,7 +4310,8 @@ int XrdXrootdProtocol::rpCheck(char *fn, char **opaque)
 
    while ((cp = index(fn, '/')))
          {fn = cp+1;
-          if (fn[0] == '.' && fn[1] == '.' && fn[2] == '/') return 1;
+          if (fn[0] == '.' && fn[1] == '.' && (fn[2] == '/' || fn[2] == '\0'))
+             return 1;
          }
    return 0;
 }

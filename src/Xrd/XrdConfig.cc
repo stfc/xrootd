@@ -33,7 +33,7 @@
    2) The config file,
    3) The /etc/services file for service corresponding to the program name.
 */
-  
+
 #include <unistd.h>
 #include <cctype>
 #include <fcntl.h>
@@ -59,7 +59,6 @@
 #include "Xrd/XrdInfo.hh"
 #include "Xrd/XrdLink.hh"
 #include "Xrd/XrdLinkCtl.hh"
-#include "Xrd/XrdMonitor.hh"
 #include "Xrd/XrdPoll.hh"
 #include "Xrd/XrdScheduler.hh"
 #include "Xrd/XrdStats.hh"
@@ -68,6 +67,7 @@
 #include "XrdNet/XrdNetAddr.hh"
 #include "XrdNet/XrdNetIdentity.hh"
 #include "XrdNet/XrdNetIF.hh"
+#include "XrdNet/XrdNetRefresh.hh"
 #include "XrdNet/XrdNetSecurity.hh"
 #include "XrdNet/XrdNetUtils.hh"
 
@@ -128,8 +128,11 @@ namespace XrdNetSocketCFG
 extern int ka_Idle;
 extern int ka_Itvl;
 extern int ka_Icnt;
+extern int udpRefr;
+
+extern XrdNetRefresh* NetRefresh;
 };
-  
+
 /******************************************************************************/
 /*                    F i l e   L o c a l   O b j e c t s                     */
 /******************************************************************************/
@@ -143,11 +146,11 @@ bool SSLmsgs = true;
 void TlsError(const char *tid, const char *msg, bool sslmsg)
              {if (!sslmsg || SSLmsgs) XrdGlobal::Log.Emsg("TLS", tid, msg);}
 };
-  
+
 /******************************************************************************/
 /*                        S t a t i c   M e m b e r s                         */
 /******************************************************************************/
-  
+
        const char       *XrdConfig::TraceID = "Config";
 
 /******************************************************************************/
@@ -238,11 +241,11 @@ XrdOucPinKing<XrdTcpMonPin> KingPin;
 
 XrdOucEnv theEnv;
 };
-  
+
 /******************************************************************************/
 /*                           C o n s t r u c t o r                            */
 /******************************************************************************/
-  
+
 XrdConfig::XrdConfig()
 {
 
@@ -265,14 +268,12 @@ XrdConfig::XrdConfig()
    AdminMode= S_IRWXU;
    HomeMode = S_IRWXU;
    Police   = 0;
-   theMon   = 0;
    Net_Opts = XRDNET_KEEPALIVE;
    TLS_Blen = 0;  // Accept OS default (leave Linux autotune in effect)
    TLS_Opts = XRDNET_KEEPALIVE | XRDNET_USETLS;
    repDest[0] = 0;
    repDest[1] = 0;
    repInt     = 600;
-   repOpts    = 0;
    ppNet      = 0;
    tlsOpts    = 9ULL | XrdTlsContext::servr | XrdTlsContext::logVF;
    tlsNoVer   = false;
@@ -317,11 +318,11 @@ XrdConfig::XrdConfig()
    // to potentially set a more restrictive limit than the current one.
    Sched.setNproc(true);
 }
-  
+
 /******************************************************************************/
 /*                             C o n f i g u r e                              */
 /******************************************************************************/
-  
+
 int XrdConfig::Configure(int argc, char **argv)
 {
 /*
@@ -408,7 +409,7 @@ int XrdConfig::Configure(int argc, char **argv)
 // options that take arguments because getopt permutes the arguments.
 //
    opterr = 0;
-   if (argc > 1 && '-' == *argv[1]) 
+   if (argc > 1 && '-' == *argv[1])
       while ((c = getopt(urArgc,argv,":a:A:bc:dhHI:k:l:L:n:N:p:P:R:s:S:vw:W:z"))
              && ((unsigned char)c != 0xff))
      { switch(c)
@@ -681,7 +682,7 @@ int XrdConfig::Configure(int argc, char **argv)
        NoGo = ConfigProc();
       }
    if (clPort >= 0) PortTCP = clPort;
-   if (ProtInfo.DebugON) 
+   if (ProtInfo.DebugON)
       {XrdTrace.What = TRACE_ALL;
        XrdSysThread::setDebug(&Log);
       }
@@ -739,6 +740,10 @@ int XrdConfig::Configure(int argc, char **argv)
 //
    if ((myInsName || HomePath)
    &&  !XrdOucUtils::makeHome(Log, myInsName, HomePath, HomeMode)) NoGo = 1;
+
+// Start the UDP network address refresher.
+//
+   XrdNetRefresh::Start(&Logger, &Sched);
 
 // Create the pid file
 //
@@ -847,7 +852,7 @@ int XrdConfig::ConfigXeq(char *var, XrdOucStream &Config, XrdSysError *eDest)
 /******************************************************************************/
 /*                               A S o c k e t                                */
 /******************************************************************************/
-  
+
 int XrdConfig::ASocket(const char *path, const char *fname, mode_t mode)
 {
    struct sockaddr_un unixvar;
@@ -890,7 +895,7 @@ int XrdConfig::ASocket(const char *path, const char *fname, mode_t mode)
 /******************************************************************************/
 /*                            C o n f i g P r o c                             */
 /******************************************************************************/
-  
+
 int XrdConfig::ConfigProc()
 {
   char *var;
@@ -963,11 +968,11 @@ XrdInet *XrdConfig::getNet(int port, bool isTLS)
    delete newNet;
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                 g e t U G                                  */
 /******************************************************************************/
-  
+
 int XrdConfig::getUG(char *parm, uid_t &newUid, gid_t &newGid)
 {
    struct passwd *pp;
@@ -986,7 +991,7 @@ int XrdConfig::getUG(char *parm, uid_t &newUid, gid_t &newGid)
 
 // Make sure it is valid and acceptable
 //
-   if (!pp) 
+   if (!pp)
       {Log.Emsg("Config", errno, "retrieve -R user password entry");
        return 0;
       }
@@ -1001,7 +1006,7 @@ int XrdConfig::getUG(char *parm, uid_t &newUid, gid_t &newGid)
 /******************************************************************************/
 /*                              M a n i f e s t                               */
 /******************************************************************************/
-  
+
 void XrdConfig::Manifest(const char *pidfn)
 {
    const char *Slash;
@@ -1093,7 +1098,7 @@ void XrdConfig::Manifest(const char *pidfn)
 /******************************************************************************/
 /*                               P i d F i l e                                */
 /******************************************************************************/
-  
+
 bool XrdConfig::PidFile(const char *clpFN, bool optbg)
 {
    int rc, xfd;
@@ -1133,7 +1138,7 @@ bool XrdConfig::PidFile(const char *clpFN, bool optbg)
 /******************************************************************************/
 /*                                s e t C F G                                 */
 /******************************************************************************/
-  
+
 void XrdConfig::setCFG(bool start)
 {
 
@@ -1190,7 +1195,7 @@ void XrdConfig::setCFG(bool start)
 /******************************************************************************/
 /*                                s e t F D L                                 */
 /******************************************************************************/
-  
+
 int XrdConfig::setFDL()
 {
    struct rlimit rlim;
@@ -1265,7 +1270,7 @@ int XrdConfig::setFDL()
 /******************************************************************************/
 /*                                 S e t u p                                  */
 /******************************************************************************/
-  
+
 int XrdConfig::Setup(char *dfltp, char *libProt)
 {
    XrdConfigProt *cp;
@@ -1308,7 +1313,7 @@ int XrdConfig::Setup(char *dfltp, char *libProt)
 
 // Determine the default port number (only for xrootd) if not specified.
 //
-   if (PortTCP < 0)  
+   if (PortTCP < 0)
       {if ((PortTCP = XrdNetUtils::ServPort(dfltp))) PortUDP = PortTCP;
           else PortTCP = -1;
       }
@@ -1342,6 +1347,7 @@ int XrdConfig::Setup(char *dfltp, char *libProt)
    ProtInfo.Stats = new XrdStats(&Log, &Sched, &BuffPool,
                                  ProtInfo.myName, Firstcp->port,
                                  ProtInfo.myInst, ProtInfo.myProg, mySitName);
+   ProtInfo.Stats->Export(theEnv);
 
 // If the base protocol is xroot, then save the base port number so we can
 // extend the port to the http protocol should it have been loaded. That way
@@ -1396,12 +1402,8 @@ int XrdConfig::Setup(char *dfltp, char *libProt)
 
 // Now check if we have to setup automatic reporting
 //
-   if (repDest[0] != 0 && repOpts) 
-      {ProtInfo.Stats->Report(repDest, repInt, repOpts);
-       theMon = new XrdMonitor;
-       XrdMonRoll* monRoll = new XrdMonRoll(*theMon);
-       theEnv.PutPtr("XrdMonRoll*", monRoll);
-      }
+   if (repDest[0] != 0 && (repOpts[0] || repOpts[1]))
+      ProtInfo.Stats->Init(repDest, repInt, repOpts[0], repOpts[1]);
 
 // All done
 //
@@ -1448,7 +1450,7 @@ int XrdConfig::SetupAPath()
 //
    return ASocket(AdminPath, "admin", (mode_t)AdminMode);
 }
-  
+
 /******************************************************************************/
 /*                              S e t u p T L S                               */
 /******************************************************************************/
@@ -1465,6 +1467,13 @@ bool XrdConfig::SetupTLS()
                        "a certdir or certfile!");
        return false;
       }
+
+// Export the CAdir and CAfile values if they have not been exported
+//
+   if (caDir  && !getenv("X509_CERT_DIR"))
+      XrdOucEnv::Export("X509_CERT_DIR",   caDir);
+   if (caFile && !getenv("X509_CERT_FILE"))
+      XrdOucEnv::Export("X509_CERT_FILE", caFile);
 
 // Set the message callback before doing anything else
 //
@@ -1495,11 +1504,11 @@ bool XrdConfig::SetupTLS()
    XrdGlobal::tlsCtx = &xrdTLS;
    return true;
 }
-  
+
 /******************************************************************************/
 /*                                 U s a g e                                  */
 /******************************************************************************/
-  
+
 void XrdConfig::Usage(int rc)
 {
   extern const char *XrdLicense;
@@ -1562,7 +1571,7 @@ int XrdConfig::xapath(XrdSysError *eDest, XrdOucStream &Config)
    AdminMode = ProtInfo.AdmMode = mode;
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                x a l l o w                                 */
 /******************************************************************************/
@@ -1709,7 +1718,7 @@ int XrdConfig::xmaxfd(XrdSysError *eDest, XrdOucStream &Config)
     char *val;
 
     if ((val = Config.GetWord()))
-       {if (!strcmp(val, "strict")) 
+       {if (!strcmp(val, "strict"))
            {isStrict = true;
             val = Config.GetWord();
            } else isStrict = false;
@@ -1736,6 +1745,7 @@ int XrdConfig::xmaxfd(XrdSysError *eDest, XrdOucStream &Config)
                                          [kaparms parms] [cache <ct>] [[no]dnr]
                                          [routes <rtype> [use <ifn1>,<ifn2>]]
                                          [[no]rpipa] [[no]dyndns]
+                                         [udprefresh <sec>]
 
              <rtype>: split | common | local
 
@@ -1748,6 +1758,8 @@ int XrdConfig::xmaxfd(XrdSysError *eDest, XrdOucStream &Config)
              routes    specifies the network configuration (see reference)
              [no]rpipa do [not] resolve private IP addresses.
              [no]dyndns This network does [not] use a dynamic DNS.
+             udprefresh Refreshes udp sendto addresses should they change
+                        This only works for connected udp sockets.
 
    Output: 0 upon success or !0 upon failure.
 */
@@ -1756,7 +1768,7 @@ int XrdConfig::xnet(XrdSysError *eDest, XrdOucStream &Config)
 {
     char *val;
     int  i, n, V_keep = -1, V_nodnr = 0, V_istls = 0, V_blen = -1, V_ct = -1;
-    int   V_assumev4 = -1, v_rpip = -1, V_dyndns = -1;
+    int   V_assumev4 = -1, v_rpip = -1, V_dyndns = -1, V_udpref = -1;
     long long llp;
     struct netopts {const char *opname; int hasarg; int opval;
                            int *oploc;  const char *etxt;}
@@ -1775,7 +1787,8 @@ int XrdConfig::xnet(XrdSysError *eDest, XrdOucStream &Config)
         {"routes",     3, 1, 0,         "routes"},
         {"rpipa",      0, 1, &v_rpip,   "rpipa"},
         {"norpipa",    0, 0, &v_rpip,   "norpipa"},
-        {"tls",        0, 1, &V_istls,  "option"}
+        {"tls",        0, 1, &V_istls,  "option"},
+        {"udprefresh", 2, 1, &V_udpref, "udprefresh"}
        };
     int numopts = sizeof(ntopts)/sizeof(struct netopts);
 
@@ -1843,6 +1856,7 @@ int XrdConfig::xnet(XrdSysError *eDest, XrdOucStream &Config)
          if (V_keep >= 0) Net_Opts = (V_keep  ? XRDNET_KEEPALIVE : 0);
          Net_Opts |= (V_nodnr ? XRDNET_NORLKUP   : 0);
         }
+
   // Turn off name chaing if not specified and dynamic dns was specified
   //
      if (V_dyndns >= 0)
@@ -1853,6 +1867,9 @@ int XrdConfig::xnet(XrdSysError *eDest, XrdOucStream &Config)
 
      if (v_rpip >= 0) XrdInet::netIF.SetRPIPA(v_rpip != 0);
      if (V_assumev4 >= 0) XrdInet::SetAssumeV4(true);
+
+     if (V_udpref >= 0)
+         XrdNetSocketCFG::udpRefr = (V_udpref < 1800 ? 1800 : V_udpref);
      return 0;
 }
 
@@ -1902,7 +1919,7 @@ int XrdConfig::xnkap(XrdSysError *eDest, char *val)
 //
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                 x p i d f                                  */
 /******************************************************************************/
@@ -1932,7 +1949,7 @@ int XrdConfig::xpidf(XrdSysError *eDest, XrdOucStream &Config)
    PidPath = strdup(val);
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                 x p o r t                                  */
 /******************************************************************************/
@@ -1973,7 +1990,7 @@ int XrdConfig::xport(XrdSysError *eDest, XrdOucStream &Config)
     return 0;
 }
 
-  
+
 /******************************************************************************/
 /*                                 x p r o t                                  */
 /******************************************************************************/
@@ -2076,7 +2093,7 @@ int XrdConfig::xprot(XrdSysError *eDest, XrdOucStream &Config)
 /******************************************************************************/
 /*                                  x r e p                                   */
 /******************************************************************************/
-  
+
 /* Function: xrep
 
    Purpose:  To parse the directive: report <dest1>[,<dest2>]
@@ -2096,23 +2113,26 @@ int XrdConfig::xprot(XrdSysError *eDest, XrdOucStream &Config)
 
 int XrdConfig::xrep(XrdSysError *eDest, XrdOucStream &Config)
 {
-   static struct repopts {const char *opname; int opval;} rpopts[] =
+   static struct repopts {const char *opname; int opval; bool jOK;} rpopts[] =
        {
-        {"all",      XRD_STATS_ALL},
-        {"buff",     XRD_STATS_BUFF},
-        {"info",     XRD_STATS_INFO},
-        {"link",     XRD_STATS_LINK},
-        {"poll",     XRD_STATS_POLL},
-        {"process",  XRD_STATS_PROC},
-        {"protocols",XRD_STATS_PROT},
-        {"prot",     XRD_STATS_PROT},
-        {"sched",    XRD_STATS_SCHD},
-        {"sgen",     XRD_STATS_SGEN},
-        {"sync",     XRD_STATS_SYNC},
-        {"syncwp",   XRD_STATS_SYNCA}
+        {"addons",   XRD_STATS_ADON, true},
+        {"all",      XRD_STATS_ALLX, true},
+        {"buff",     XRD_STATS_BUFF, false},
+        {"info",     XRD_STATS_INFO, false},
+        {"link",     XRD_STATS_LINK, false},
+        {"plugins",  XRD_STATS_PLUG, true},
+        {"poll",     XRD_STATS_POLL, false},
+        {"process",  XRD_STATS_PROC, false},
+        {"protocols",XRD_STATS_PROT, false},
+        {"prot",     XRD_STATS_PROT, false},
+        {"sched",    XRD_STATS_SCHD, false},
+        {"sgen",     XRD_STATS_SGEN, false},
+        {"sync",     XRD_STATS_SYNC, true},
+        {"syncwp",   XRD_STATS_SYNCA,true}
        };
    int i, neg, numopts = sizeof(rpopts)/sizeof(struct repopts);
    char  *val, *cp;
+   int  isJSON = 0;
 
    if (!(val = Config.GetWord()))
       {eDest->Emsg("Config", "report parameters not specified"); return 1;}
@@ -2121,7 +2141,7 @@ int XrdConfig::xrep(XrdSysError *eDest, XrdOucStream &Config)
 //
    if (repDest[0]) {free(repDest[0]); repDest[0] = 0;}
    if (repDest[1]) {free(repDest[1]); repDest[1] = 0;}
-   repOpts = 0;
+   repOpts[0] = 0; repOpts[1] = 0;
    repInt  = 600;
 
 // Decode the destination
@@ -2151,7 +2171,7 @@ int XrdConfig::xrep(XrdSysError *eDest, XrdOucStream &Config)
 // Get optional "every"
 //
    if (!(val = Config.GetWord()))
-      {repOpts = static_cast<char>(XRD_STATS_ALL);
+      {repOpts[0] = XRD_STATS_ALLX; // Default is XML
        return 0;
       }
 
@@ -2165,25 +2185,52 @@ int XrdConfig::xrep(XrdSysError *eDest, XrdOucStream &Config)
 // Get reporting options
 //
    while(val)
-        {if (!strcmp(val, "off")) repOpts = 0;
-            else {if ((neg = (val[0] == '-' && val[1]))) val++;
-                  for (i = 0; i < numopts; i++)
-                      {if (!strcmp(val, rpopts[i].opname))
-                          {if (neg) repOpts &= ~rpopts[i].opval;
-                              else  repOpts |=  rpopts[i].opval;
-                           break;
+        {if (!strcmp(val, "json"))
+            {isJSON = 1;
+             val = Config.GetWord(); continue;
+            }
+         if (!strcmp(val, "off"))
+            {repOpts[isJSON] = 0;
+             val = Config.GetWord(); continue;
+            }
+         if ((neg = (val[0] == '-' && val[1]))) val++;
+         for (i = 0; i < numopts; i++)
+             {if (!strcmp(val, rpopts[i].opname))
+                 {if (neg) repOpts[isJSON] &= ~rpopts[i].opval;
+                     else {if (isJSON && !rpopts[i].jOK)
+                              {eDest->Emsg("Config",val,"does not support JSON");
+                               return 1;
+                              }
+                           repOpts[isJSON] |=  rpopts[i].opval;
                           }
-                      }
-                  if (i >= numopts)
-                     eDest->Say("Config warning: ignoring invalid report option '",val,"'.");
-                 }
+                   break;
+                  }
+             }
+         if (i >= numopts)
+            eDest->Say("Config warning: ignoring invalid report option '",val,"'.");
          val = Config.GetWord();
         }
 
+// Apply the sync option to all formats
+//
+   if ((repOpts[0] | repOpts[1]) & XRD_STATS_SYNC)
+      {repOpts[0] |= XRD_STATS_SYNC; repOpts[0] &= ~XRD_STATS_SYNCA;
+       repOpts[1] |= XRD_STATS_SYNC; repOpts[1] &= ~XRD_STATS_SYNCA;
+      } else {
+       if ((repOpts[0] | repOpts[1]) & XRD_STATS_SYNCA)
+          {repOpts[0] |= XRD_STATS_SYNCA;
+           repOpts[1] |= XRD_STATS_SYNCA;
+          }
+      }
+
+// If at the end nothing was selected, then provide the default
+//
+   if (!((repOpts[0] | repOpts[1])  & XRD_STATS_ALLX))
+      repOpts[0] |= (XRD_STATS_ALLX & ~XRD_STATS_INFO);
+   repOpts[1] &= XRD_STATS_ALLJ | XRD_STATS_SYNC | XRD_STATS_SYNCA;
+
 // All done
 //
-   if (!(repOpts & XRD_STATS_ALL))
-      repOpts = char(XRD_STATS_ALL & ~XRD_STATS_INFO);
    return 0;
 }
 
@@ -2379,7 +2426,7 @@ int XrdConfig::xtcpmon(XrdSysError *eDest, XrdOucStream &Config)
 //
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                  x t l s                                   */
 /******************************************************************************/
@@ -2436,7 +2483,7 @@ do {     if (!strcmp(val,   "detail")) SSLmsgs = true;
 
     return 0;
 }
-  
+
 /******************************************************************************/
 /*                                x t l s c a                                 */
 /******************************************************************************/
@@ -2550,7 +2597,7 @@ int XrdConfig::xtlsca(XrdSysError *eDest, XrdOucStream &Config)
 
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                x t l s c i                                 */
 /******************************************************************************/
@@ -2581,7 +2628,7 @@ int XrdConfig::xtlsci(XrdSysError *eDest, XrdOucStream &Config)
    XrdTlsContext::SetDefaultCiphers(ciphers);
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                  x t m o                                   */
 /******************************************************************************/
@@ -2653,7 +2700,7 @@ int XrdConfig::xtmo(XrdSysError *eDest, XrdOucStream &Config)
    XrdLinkCtl::setKWT(V_read, V_kill);
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                x t r a c e                                 */
 /******************************************************************************/

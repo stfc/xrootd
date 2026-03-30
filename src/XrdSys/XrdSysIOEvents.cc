@@ -716,9 +716,13 @@ bool XrdSys::IOEvents::Poller::CbkXeq(XrdSys::IOEvents::Channel *cP, int events,
 //
    cP->chStat = Channel::isCBMode;
    chDead     = false;
+   // Detach() may be called after unlocking the channel and would zero the
+   // callback pointer and argument. So keep a copy.
+   CallBack *cb = cP->chCB;
+   void *cba = cP->chCBA;
    cbkMHelp.UnLock();
    IF_TRACE(CbkXeq,cP->chFD,"invoking callback; events=" <<events);
-   cbok = cP->chCB->Event(cP,cP->chCBA, events);
+   cbok = cb->Event(cP,cba, events);
    IF_TRACE(CbkXeq,cP->chFD,"callback returned " <<BOOLNAME(cbok));
 
 // If channel destroyed by the callback, bail really fast. Otherwise, regain
@@ -732,7 +736,11 @@ bool XrdSys::IOEvents::Poller::CbkXeq(XrdSys::IOEvents::Channel *cP, int events,
 //
    if (cP->chStat != Channel::isCBMode)
       {if (cP->chStat == Channel::isDead)
-          ((XrdSysSemaphore *)cP->chCBA)->Post();
+          {XrdSysSemaphore *theSem = (XrdSysSemaphore *)cP->chCBA;
+           // channel will be destroyed shortly after post, unlock mutex before
+           cbkMHelp.UnLock();
+           theSem->Post();
+          }
        return true;
       }
    cP->chStat = Channel::isClear;

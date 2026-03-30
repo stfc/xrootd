@@ -50,6 +50,7 @@
 #include "XrdHttpReadRangeHandler.hh"
 #include "XrdNet/XrdNetPMark.hh"
 #include "XrdSciTokens/XrdSciTokensRedir.hh"
+#include "XrdHttpCors/XrdHttpCors.hh"
 
 #include <openssl/ssl.h>
 
@@ -207,6 +208,7 @@ private:
   static int xsslcert(XrdOucStream &Config);
   static int xsslkey(XrdOucStream &Config);
   static int xsecxtractor(XrdOucStream &Config);
+  static int xcors(XrdOucStream &Config);
   static int xexthandler(XrdOucStream & Config, std::vector<extHInfo> &hiVec);
   static int xsslcadir(XrdOucStream &Config);
   static int xsslcipherfilter(XrdOucStream &Config);
@@ -228,6 +230,9 @@ private:
   static int xauth(XrdOucStream &Config);
   static int xredirtoken(XrdOucStream &Config);
   
+  static int xtlsclientauth(XrdOucStream &Config);
+  static int xmaxdelay(XrdOucStream &Config);
+
   static bool isRequiredXtractor; // If true treat secxtractor errors as fatal
   static XrdHttpSecXtractor *secxtractor;
   
@@ -256,6 +261,7 @@ private:
                             const char *configFN, const char *libParms,
                             XrdOucEnv *myEnv, const char *instName);
 
+  static int LoadCorsHandler(XrdSysError *eDest, const char * libname);
   // Determines whether one of the loaded ExtHandlers are interested in
   // handling a given request.
   //
@@ -376,7 +382,9 @@ protected:
   /// This also can process HTTP/DAV stuff
   XrdHttpReq CurrentReq;
 
+  static std::string xrdcorsLibPath;
 
+  static XrdHttpCors * xrdcors;
   //
   // Processing configuration values
   //
@@ -427,6 +435,10 @@ protected:
   
   // Url to redirect to in the case a /static is requested
   static char *staticredir;
+
+  // Maximum amount of time an operation on the bridge can be
+  // delayed
+  static int m_maxdelay;
 
   // Hash that keeps preloaded files
   struct StaticPreloadInfo {

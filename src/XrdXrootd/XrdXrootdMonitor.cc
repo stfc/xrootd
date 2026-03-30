@@ -337,7 +337,7 @@ void XrdXrootdMonitor::User::Report(int eCode, int aCode)
 {
    char buff[1024];
 
-   snprintf(buff, sizeof(buff), "&Uc=%d&Ec=%d&Ac=%d", ntohl(Did), eCode, aCode);
+   snprintf(buff, sizeof(buff), "&Uc=%u&Ec=%d&Ac=%d", ntohl(Did), eCode, aCode);
 
    XrdXrootdMonitor::Map(XROOTD_MON_MAPUEAC,*this,buff);
 }
@@ -352,7 +352,7 @@ bool XrdXrootdMonitor::User::Report(WhatInfo infoT, const char *info)
 //
    if (infoT != TokenInfo) return false;
 
-   snprintf(buff, sizeof(buff), "&Uc=%d%s%s", ntohl(Did),
+   snprintf(buff, sizeof(buff), "&Uc=%u%s%s", ntohl(Did),
                                 (*info == '&' ? "" : "&"), info);
 
    XrdXrootdMonitor::Map(XROOTD_MON_MAPTOKN,*this,buff);
@@ -738,7 +738,7 @@ int XrdXrootdMonitor::Init()
 // Setup the primary destination
 //
    if (Dest1)
-      {InetDest1 = new XrdNetMsg(eDest, Dest1, &aOK);
+      {InetDest1 = new XrdNetMsg(eDest, Dest1, &aOK, true);
        if (!aOK)
           {eDest->Emsg("Monitor", "Unable to setup primary monitor collector.");
            return 0;
@@ -748,7 +748,7 @@ int XrdXrootdMonitor::Init()
 // Setup the secondary destination
 //
    if (Dest2)
-      {InetDest2 = new XrdNetMsg(eDest, Dest2, &aOK);
+      {InetDest2 = new XrdNetMsg(eDest, Dest2, &aOK, true);
        if (!aOK)
           {eDest->Emsg("Monitor","Unable to setup secondary monitor collector.");
            return 0;

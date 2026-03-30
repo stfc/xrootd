@@ -57,6 +57,7 @@
 #include "XrdOuc/XrdOucTUtils.hh"
 #include "XrdOuc/XrdOucUtils.hh"
 #include "XrdOuc/XrdOucPrivateUtils.hh"
+#include "XrdHttp/XrdHttpHeaderUtils.hh"
 
 #include "XrdHttpUtils.hh"
 
@@ -206,6 +207,9 @@ int XrdHttpReq::parseLine(char *line, int len) {
     } else if (!strcasecmp(key, "user-agent")) {
       m_user_agent = val;
       trim(m_user_agent);
+    } else if (!strcasecmp(key,"origin")) {
+      m_origin = val;
+      trim(m_origin);
     } else {
       // Some headers need to be translated into "local" cgi info.
       auto it = std::find_if(prot->hdr2cgimap.begin(), prot->hdr2cgimap.end(),[key](const auto & item) {
@@ -819,124 +823,23 @@ void XrdHttpReq::parseResource(char *res) {
     resourceplusopaque.append('?');
     resourceplusopaque.append(p + 1);
   }
-  
-  
-  
 }
 
-void XrdHttpReq::sendWebdavErrorMessage(
-    XResponseType xrdresp, XErrorCode xrderrcode, XrdHttpReq::ReqType httpVerb,
-    XRequestTypes xrdOperation, std::string etext, const char *desc,
-    const char *header_to_add, bool keepalive) {
-  int code{0};
-  std::string errCode{"Unknown"};
-  std::string statusText;
+void XrdHttpReq::generateWebdavErrMsg() {
 
-  switch (httpVerb) {
-    case XrdHttpReq::rtPUT:
-      if (xrdOperation == kXR_open) {
-        if (xrderrcode == kXR_isDirectory) {
-          code = 409;
-          errCode = "8.1";
-        } else if (xrderrcode == kXR_NoSpace) {
-          code = 507;
-          errCode = "8.3.1";
-        } else if (xrderrcode == kXR_overQuota) {
-          code = 507;
-          errCode = "8.3.2";
-        } else if (xrderrcode == kXR_NotAuthorized) {
-          code = 403;
-          errCode = "9.3";
-        }
-      } else if (xrdOperation == kXR_write) {
-        if (xrderrcode == kXR_NoSpace) {
-          code = 507;
-          errCode = "8.4.1";
-        } else if (xrderrcode == kXR_overQuota) {
-          code = 507;
-          errCode = "8.4.2";
-        }
-      }
-      break;
-    default:
-      break;
+  // This block is only used when sending an "X-Transfer-Status" trailer response.
+  // We set the body to "OK" so that the trailer becomes "X-Transfer-Status: 200 OK",
+  // indicating a successful transfer.
+  if (xrdresp == kXR_ok) {
+    httpStatusCode = 200;
+    httpErrorBody = "OK";
+    return;
   }
 
-  // Remove the if at the end of project completion
-  // Till then status text defaults to as set by mapXrdResponseToHttpStatus
-  if (code != 0) {
-    httpStatusCode = code;
-    httpErrorCode = errCode;
-    httpErrorBody = "ERROR: " + errCode + ": " + etext + "\n";
+  // default error
+  httpStatusCode = mapXrdErrToHttp(xrderrcode);
+  httpErrorBody = etext + "\n";
 
-    prot->SendSimpleResp(httpStatusCode, desc, header_to_add,
-                         httpErrorBody.c_str(), httpErrorBody.length(),
-                         keepalive);
-  }
-}
-
-// Map an XRootD error code to an appropriate HTTP status code and message
-// The variables httpStatusCode and httpErrorBody will be populated
-
-void XrdHttpReq::mapXrdErrorToHttpStatus() {
-  // Set default HTTP status values for an error case
-  httpStatusCode = 500;
-  httpErrorBody = "Unrecognized error";
-
-  // Do error mapping
-  if (xrdresp == kXR_error) {
-    switch (xrderrcode) {
-      case kXR_AuthFailed:
-        httpStatusCode = 401; httpErrorBody = "Unauthorized";
-        break;
-      case kXR_NotAuthorized:
-        httpStatusCode = 403; httpErrorBody = "Operation not permitted";
-        break;
-      case kXR_NotFound:
-        httpStatusCode = 404; httpErrorBody = "File not found";
-        break;
-      case kXR_Unsupported:
-        httpStatusCode = 405; httpErrorBody = "Operation not supported";
-        break;
-      case kXR_FileLocked:
-        httpStatusCode = 423; httpErrorBody = "Resource is a locked";
-        break;
-      case kXR_isDirectory:
-        httpStatusCode = 409; httpErrorBody = "Resource is a directory";
-        break;
-      case kXR_ItExists:
-        if(request != ReqType::rtDELETE) {
-          httpStatusCode = 409; httpErrorBody = "File already exists";
-        } else {
-          // In the case the XRootD layer returns a kXR_ItExists after a deletion
-          // was submitted, we return a 405 status code with the error message set by
-          // the XRootD layer
-          httpStatusCode = 405;
-        }
-        break;
-      case kXR_InvalidRequest:
-        httpStatusCode = 405; httpErrorBody = "Method is not allowed";
-        break;
-      case kXR_noserver:
-        httpStatusCode = 502; httpErrorBody = "Bad Gateway";
-        break;
-      case kXR_TimerExpired:
-        httpStatusCode = 504; httpErrorBody = "Gateway timeout";
-        break;
-      default:
-        break;
-    }
-
-    if (!etext.empty()) httpErrorBody = etext;
-
-    TRACEI(REQ, "PostProcessHTTPReq mapping Xrd error [" << xrderrcode
-                 << "] to status code [" << httpStatusCode << "]");
-
-    httpErrorBody += "\n";
-  } else {
-      httpStatusCode = 200;
-      httpErrorBody = "OK";
-  }
 }
 
 int XrdHttpReq::ProcessHTTPReq() {
@@ -984,11 +887,6 @@ int XrdHttpReq::ProcessHTTPReq() {
         << header2cgistrObf.c_str() << "'");
 
     }
-    // We assume that anything appended to the CGI str should also
-    // apply to the destination in case of a MOVE.
-    if (strchr(destination.c_str(), '?')) destination.append("&");
-    else destination.append("?");
-    destination.append(hdr2cgistrEncoded.c_str());
 
     m_appended_hdr2cgistr = true;
     }
@@ -1014,14 +912,9 @@ int XrdHttpReq::ProcessHTTPReq() {
   switch (request) {
     case XrdHttpReq::rtUnset:
     case XrdHttpReq::rtUnknown:
-    {
-      prot->SendSimpleResp(400, NULL, NULL, (char *) "Request unknown", 0, false);
-      reset();
-      return -1;
-    }
-    case XrdHttpReq::rtMalformed:
-    {
-      prot->SendSimpleResp(400, NULL, NULL, (char *) "Request malformed", 0, false);
+    case XrdHttpReq::rtMalformed: {
+      generateWebdavErrMsg();
+      prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), false);
       reset();
       return -1;
     }
@@ -1042,7 +935,8 @@ int XrdHttpReq::ProcessHTTPReq() {
         m_req_cksum = prot->cksumHandler.getChecksumToRun(m_req_digest);
         if(!m_req_cksum) {
             // No HTTP IANA checksums have been configured by the server admin, return a "METHOD_NOT_ALLOWED" error
-            prot->SendSimpleResp(403, NULL, NULL, (char *) "No HTTP-IANA compatible checksums have been configured.", 0, false);
+            // We should not send body in response to HEAD request
+            prot->SendSimpleResp(HTTP_METHOD_NOT_ALLOWED, NULL, NULL, NULL, 0, false);
             return -1;
         }
         if (!opaque) {
@@ -1143,7 +1037,7 @@ int XrdHttpReq::ProcessHTTPReq() {
           l = resourceplusopaque.length() + 1;
           xrdreq.open.dlen = htonl(l);
           xrdreq.open.mode = 0;
-          xrdreq.open.options = htons(kXR_retstat | kXR_open_read);
+          xrdreq.open.options = htons(kXR_retstat | kXR_open_read | ((readRangeHandler.getMaxRanges() <= 1) ? kXR_seqio : 0));
 
           if (!prot->Bridge->Run((char *) &xrdreq, (char *) resourceplusopaque.c_str(), l)) {
             prot->SendSimpleResp(404, NULL, NULL, (char *) "Could not run request.", 0, false);
@@ -1164,7 +1058,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             m_req_cksum = prot->cksumHandler.getChecksumToRun(m_req_digest);
             if(!m_req_cksum) {
                 // No HTTP IANA checksums have been configured by the server admin, return a "METHOD_NOT_ALLOWED" error
-                prot->SendSimpleResp(403, NULL, NULL, (char *) "No HTTP-IANA compatible checksums have been configured.", 0, false);
+                prot->SendSimpleResp(HTTP_METHOD_NOT_ALLOWED, NULL, NULL, (char *) "No HTTP-IANA compatible checksums have been configured.", 0, false);
                 return -1;
             }
             m_resource_with_digest = resourceplusopaque;
@@ -1192,7 +1086,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             memcpy(xrdreq.close.fhandle, fhandle, 4);
 
             if (!prot->Bridge->Run((char *) &xrdreq, 0, 0)) {
-              mapXrdErrorToHttpStatus();
+              generateWebdavErrMsg();
               return sendFooterError("Could not run close request on the bridge");
             }
             return 0;
@@ -1232,7 +1126,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             xrdreq.dirlist.dlen = htonl(l);
 
             if (!prot->Bridge->Run((char *) &xrdreq, (char *) res.c_str(), l)) {
-              mapXrdErrorToHttpStatus();
+              generateWebdavErrMsg();
               prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), false);
               sendFooterError("Could not run listing request on the bridge");
               return -1;
@@ -1334,7 +1228,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             }
             
             if (!prot->Bridge->Run((char *) &xrdreq, 0, 0)) {
-              mapXrdErrorToHttpStatus();
+              generateWebdavErrMsg();
               return sendFooterError("Could not run read request on the bridge");
             }
           } else {
@@ -1343,7 +1237,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             length = ReqReadV(readChunkList);
 
             if (!prot->Bridge->Run((char *) &xrdreq, (char *) &ralist[0], length)) {
-              mapXrdErrorToHttpStatus();
+              generateWebdavErrMsg();
               return sendFooterError("Could not run ReadV request on the bridge");
             }
 
@@ -1480,7 +1374,7 @@ int XrdHttpReq::ProcessHTTPReq() {
 
             TRACEI(REQ, "XrdHTTP PUT: Writing chunk of size " << bytes_to_write << " starting with '" << *(prot->myBuffStart) << "'" << " with " << chunk_bytes_remaining << " bytes remaining in the chunk");
             if (!prot->Bridge->Run((char *) &xrdreq, prot->myBuffStart, bytes_to_write)) {
-              mapXrdErrorToHttpStatus();
+              generateWebdavErrMsg();
               return sendFooterError("Could not run write request on the bridge");
             }
             // If there are more bytes in the buffer, then immediately call us after the
@@ -1503,7 +1397,7 @@ int XrdHttpReq::ProcessHTTPReq() {
 
           TRACEI(REQ, "Writing " << bytes_to_read);
           if (!prot->Bridge->Run((char *) &xrdreq, prot->myBuffStart, bytes_to_read)) {
-            mapXrdErrorToHttpStatus();
+            generateWebdavErrMsg();
             return sendFooterError("Could not run write request on the bridge");
           }
 
@@ -1526,7 +1420,7 @@ int XrdHttpReq::ProcessHTTPReq() {
 
 
           if (!prot->Bridge->Run((char *) &xrdreq, 0, 0)) {
-            mapXrdErrorToHttpStatus();
+            generateWebdavErrMsg();
             return sendFooterError("Could not run close request on the bridge");
           }
 
@@ -1728,54 +1622,48 @@ int XrdHttpReq::ProcessHTTPReq() {
     }
     case XrdHttpReq::rtMOVE:
     {
+      // Skip the protocol part of destination URL
+      size_t skip = destination.find("://");
+      skip = (skip == std::string::npos) ? 0 : skip + 3;
 
-      // --------- MOVE
-      memset(&xrdreq, 0, sizeof (ClientRequest));
-      xrdreq.mv.requestid = htons(kXR_mv);
-
-      std::string s = resourceplusopaque.c_str();
-      s += " ";
-
-      char buf[256];
-      char *ppath;
-      int port = 0;
-      if (parseURL((char *) destination.c_str(), buf, port, &ppath)) {
-        prot->SendSimpleResp(501, NULL, NULL, (char *) "Cannot parse destination url.", 0, false);
-        return -1;
-      }
-
-      char buf2[256];
-      strcpy(buf2, host.c_str());
-      char *pos = strchr(buf2, ':');
-      if (pos) *pos = '\0';
-     
-      // If we are a redirector we enforce that the host field is equal to
-      // whatever was written in the destination url
-      //
-      // If we are a data server instead we cannot enforce anything, we will
-      // just ignore the host part of the destination
-      if ((prot->myRole == kXR_isManager) && strcmp(buf, buf2)) {
+      // If we have a manager role, enforce source and destination are on the same host
+      if (prot->myRole == kXR_isManager && destination.compare(skip, host.size(), host) != 0) {
         prot->SendSimpleResp(501, NULL, NULL, (char *) "Only in-place renaming is supported for MOVE.", 0, false);
         return -1;
       }
 
+      // If needed, append opaque info from source onto destination
+      int pos = resourceplusopaque.find("?");
+      if (pos != STR_NPOS) {
+        destination.append((destination.find("?") == std::string::npos) ? "?" : "&");
+        destination.append(resourceplusopaque.c_str() + pos + 1);
+      }
 
+      size_t path_pos = destination.find('/', skip + 1);
 
+      if (path_pos == std::string::npos) {
+        prot->SendSimpleResp(400, NULL, NULL, (char *) "Cannot determine destination path", 0, false);
+        return -1;
+      }
 
-      s += ppath;
+      // Construct args to kXR_mv request (i.e. <src> + " " + <dst>)
+      std::string mv_args = std::string(resourceplusopaque.c_str()) + " " + destination.substr(path_pos);
 
-      l = s.length() + 1;
-      xrdreq.mv.dlen = htonl(l);
+      l = mv_args.length() + 1;
+
+      // Prepare and run kXR_mv request
+      memset(&xrdreq, 0, sizeof (ClientRequest));
+      xrdreq.mv.requestid = htons(kXR_mv);
       xrdreq.mv.arg1len = htons(resourceplusopaque.length());
+      xrdreq.mv.dlen = htonl(l);
       
-      if (!prot->Bridge->Run((char *) &xrdreq, (char *) s.c_str(), l)) {
-        prot->SendSimpleResp(501, NULL, NULL, (char *) "Could not run request.", 0, false);
+      if (!prot->Bridge->Run((char *) &xrdreq, (char *) mv_args.c_str(), l)) {
+        prot->SendSimpleResp(500, NULL, NULL, (char *) "Could not run request.", 0, false);
         return -1;
       }
 
       // We don't want to be invoked again after this request is finished
       return 1;
-
     }
     default:
     {
@@ -2132,7 +2020,7 @@ void XrdHttpReq::setTransferStatusHeader(std::string &header) {
 int XrdHttpReq::PostProcessHTTPReq(bool final_) {
 
   TRACEI(REQ, "PostProcessHTTPReq req: " << request << " reqstate: " << reqstate << " final_:" << final_);
-  mapXrdErrorToHttpStatus();
+  generateWebdavErrMsg();
 
   if(xrdreq.set.requestid == htons(kXR_set)) {
     // We have set the user agent, if it fails we return a 500 error, otherwise the callback is successful --> we continue
@@ -2368,8 +2256,7 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
     {
       if (!fopened) {
         if (xrdresp != kXR_ok) {
-          sendWebdavErrorMessage(xrdresp, xrderrcode, XrdHttpReq::rtPUT,
-                                 kXR_open, etext, NULL, NULL, keepalive);
+          prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), keepalive);
           return -1;
         }
 
@@ -2387,9 +2274,13 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
         break;
       } else {
 
-
         // If we are here it's too late to send a proper error message...
-        if (xrdresp == kXR_error) return -1;
+        // However, we decide to send a response anyway before we close the connection
+        // We are not sure if sending a final response before reading the entire request
+        if (xrdresp == kXR_error) {
+          prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), keepalive);
+          return -1;
+        }
 
         if (ntohs(xrdreq.header.requestid) == kXR_write) {
           int l = ntohl(xrdreq.write.dlen);
@@ -2414,8 +2305,7 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
             prot->SendSimpleResp(201, NULL, NULL, (char *)":-)", 0, keepalive);
             return keepalive ? 1 : -1;
           } else {
-            sendWebdavErrorMessage(xrdresp, xrderrcode, XrdHttpReq::rtPUT,
-                                   kXR_close, etext, NULL, NULL, keepalive);
+            prot->SendSimpleResp(httpStatusCode, NULL, NULL, httpErrorBody.c_str(), httpErrorBody.length(), keepalive);
             return -1;
           }
         }
@@ -2850,6 +2740,7 @@ void XrdHttpReq::reset() {
 
   m_resource_with_digest = "";
   m_user_agent = "";
+  m_origin = "";
 
   headerok = false;
   keepalive = true;
@@ -2896,6 +2787,11 @@ void XrdHttpReq::reset() {
   final = false;
 
   mScitag = -1;
+
+  httpStatusCode = -1;
+  httpErrorCode = "";
+  httpErrorBody = "";
+
 }
 
 void XrdHttpReq::getfhandle() {
