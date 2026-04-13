@@ -54,6 +54,7 @@ jobs:
           libzip-dev \
           linux-headers \
           make \
+          nlohmann-json \
           openssl \
           openssl-dev \
           procps \
@@ -68,7 +69,7 @@ jobs:
           zlib-dev
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -102,7 +103,7 @@ jobs:
         dnf config-manager --set-enabled powertools
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -138,7 +139,7 @@ jobs:
         dnf config-manager --set-enabled crb
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -174,7 +175,7 @@ jobs:
         dnf config-manager --set-enabled crb
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -217,7 +218,7 @@ jobs:
       run: dnf install -y dnf-plugins-core git ninja-build rpmdevtools ${{ matrix.compiler }}
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -263,7 +264,7 @@ jobs:
         sudo apt install -y build-essential devscripts equivs git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -302,10 +303,10 @@ jobs:
       run: sudo sed -i -e "s/localhost/localhost $(hostname)/g" /etc/hosts
 
     - name: Install dependencies with Homebrew
-      run: brew install googletest libzip python-setuptools
+      run: brew install googletest libzip nlohmann-json python-setuptools
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 

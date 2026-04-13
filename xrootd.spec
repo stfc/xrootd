@@ -16,7 +16,7 @@ License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AN
 URL:		https://xrootd.org
 
 %if !%{with git}
-Version:	5.9.1
+Version:	6.0.0
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
@@ -52,6 +52,7 @@ BuildRequires:	python3-pip
 BuildRequires:	python3-setuptools
 BuildRequires:	python3-wheel
 BuildRequires:	json-c-devel
+BuildRequires:	json-devel
 BuildRequires:	libmacaroons-devel
 BuildRequires:	libuuid-devel
 BuildRequires:	voms-devel
@@ -526,18 +527,18 @@ fi
 %{_libdir}/libXrdUtils.so.*
 %{_libdir}/libXrdXml.so.*
 # Plugins
-%{_libdir}/libXrdCksCalczcrc32-5.so
-%{_libdir}/libXrdCryptossl-5.so
-%{_libdir}/libXrdSec-5.so
-%{_libdir}/libXrdSecProt-5.so
-%{_libdir}/libXrdSecgsi-5.so
-%{_libdir}/libXrdSecgsiAUTHZVO-5.so
-%{_libdir}/libXrdSecgsiGMAPDN-5.so
-%{_libdir}/libXrdSeckrb5-5.so
-%{_libdir}/libXrdSecpwd-5.so
-%{_libdir}/libXrdSecsss-5.so
-%{_libdir}/libXrdSecunix-5.so
-%{_libdir}/libXrdSecztn-5.so
+%{_libdir}/libXrdCksCalczcrc32-6.so
+%{_libdir}/libXrdCryptossl-6.so
+%{_libdir}/libXrdSec-6.so
+%{_libdir}/libXrdSecProt-6.so
+%{_libdir}/libXrdSecgsi-6.so
+%{_libdir}/libXrdSecgsiAUTHZVO-6.so
+%{_libdir}/libXrdSecgsiGMAPDN-6.so
+%{_libdir}/libXrdSeckrb5-6.so
+%{_libdir}/libXrdSecpwd-6.so
+%{_libdir}/libXrdSecsss-6.so
+%{_libdir}/libXrdSecunix-6.so
+%{_libdir}/libXrdSecztn-6.so
 %license COPYING* LICENSE
 
 %files devel
@@ -573,10 +574,10 @@ fi
 %{_libdir}/libXrdSsiLib.so.*
 %{_libdir}/libXrdSsiShMap.so.*
 # Plugins
-%{_libdir}/libXrdClHttp-5.so
-%{_libdir}/libXrdClS3-5.so
-%{_libdir}/libXrdClProxyPlugin-5.so
-%{_libdir}/libXrdClRecorder-5.so
+%{_libdir}/libXrdClHttp-6.so
+%{_libdir}/libXrdClS3-6.so
+%{_libdir}/libXrdClProxyPlugin-6.so
+%{_libdir}/libXrdClRecorder-6.so
 %dir %{_sysconfdir}/%{name}
 %config(noreplace) %{_sysconfdir}/%{name}/client.conf
 %dir %{_sysconfdir}/%{name}/client.plugins.d
@@ -599,27 +600,27 @@ fi
 %{_libdir}/libXrdHttpUtils.so.*
 %{_libdir}/libXrdServer.so.*
 # Plugins
-%{_libdir}/libXrdBlacklistDecision-5.so
-%{_libdir}/libXrdBwm-5.so
-%{_libdir}/libXrdCmsRedirectLocal-5.so
-%{_libdir}/libXrdFileCache-5.so
-%{_libdir}/libXrdHttp-5.so
-%{_libdir}/libXrdHttpTPC-5.so
-%{_libdir}/libXrdHttpCors-5.so
-%{_libdir}/libXrdMacaroons-5.so
-%{_libdir}/libXrdN2No2p-5.so
-%{_libdir}/libXrdOfsPrepGPI-5.so
-%{_libdir}/libXrdOssArc-5.so
-%{_libdir}/libXrdOssCsi-5.so
-%{_libdir}/libXrdOssSIgpfsT-5.so
-%{_libdir}/libXrdOssStats-5.so
-%{_libdir}/libXrdPfc-5.so
-%{_libdir}/libXrdPfcPurgeQuota-5.so
-%{_libdir}/libXrdPss-5.so
-%{_libdir}/libXrdSsi-5.so
-%{_libdir}/libXrdSsiLog-5.so
-%{_libdir}/libXrdThrottle-5.so
-%{_libdir}/libXrdXrootd-5.so
+%{_libdir}/libXrdBlacklistDecision-6.so
+%{_libdir}/libXrdBwm-6.so
+%{_libdir}/libXrdCmsRedirectLocal-6.so
+%{_libdir}/libXrdFileCache-6.so
+%{_libdir}/libXrdHttp-6.so
+%{_libdir}/libXrdHttpTPC-6.so
+%{_libdir}/libXrdHttpCors-6.so
+%{_libdir}/libXrdMacaroons-6.so
+%{_libdir}/libXrdN2No2p-6.so
+%{_libdir}/libXrdOfsPrepGPI-6.so
+%{_libdir}/libXrdOssArc-6.so
+%{_libdir}/libXrdOssCsi-6.so
+%{_libdir}/libXrdOssSIgpfsT-6.so
+%{_libdir}/libXrdOssStats-6.so
+%{_libdir}/libXrdPfc-6.so
+%{_libdir}/libXrdPfcPurgeQuota-6.so
+%{_libdir}/libXrdPss-6.so
+%{_libdir}/libXrdSsi-6.so
+%{_libdir}/libXrdSsiLog-6.so
+%{_libdir}/libXrdThrottle-6.so
+%{_libdir}/libXrdXrootd-6.so
 
 %files server-devel
 %{_includedir}/%{name}/XrdAcc
@@ -663,21 +664,21 @@ fi
 %{_mandir}/man1/xrootdfs.1*
 
 %files voms
-%{_libdir}/libXrdVoms-5.so
-%{_libdir}/libXrdHttpVOMS-5.so
-%{_libdir}/libXrdSecgsiVOMS-5.so
+%{_libdir}/libXrdVoms-6.so
+%{_libdir}/libXrdHttpVOMS-6.so
+%{_libdir}/libXrdSecgsiVOMS-6.so
 %doc %{_mandir}/man1/libXrdVoms.1*
 %doc %{_mandir}/man1/libXrdSecgsiVOMS.1*
 
 %files scitokens
-%{_libdir}/libXrdAccSciTokens-5.so
+%{_libdir}/libXrdAccSciTokens-6.so
 %doc src/XrdSciTokens/README.md
 
 
 %if %{with ceph}
 %files ceph
-%{_libdir}/libXrdCeph-5.so
-%{_libdir}/libXrdCephXattr-5.so
+%{_libdir}/libXrdCeph-6.so
+%{_libdir}/libXrdCephXattr-6.so
 %{_libdir}/libXrdCephPosix.so.*
 %endif
 
@@ -692,6 +693,12 @@ fi
 %endif
 
 %changelog
+
+* Wed Apr 8 2026 Guilherme Amadio <amadio@cern.ch> - 1:6.0.0-1
+- XRootD 6.0.0
+
+* Fri Mar 27 2026 Guilherme Amadio <amadio@cern.ch> - 1:5.9.2-1
+- XRootD 5.9.2
 
 * Mon Nov 17 2025 Guilherme Amadio <amadio@cern.ch> - 1:5.9.1-1
 - XRootD 5.9.1
