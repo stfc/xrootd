@@ -31,6 +31,7 @@ using namespace XrdPfc;
 XrdVERSIONINFO(XrdOucGetCache, XrdPfc);
 
 Configuration::Configuration() :
+   m_write_through(false),
    m_hdfsmode(false),
    m_allow_xrdpfc_command(false),
    m_data_space("public"),
@@ -59,7 +60,9 @@ Configuration::Configuration() :
    m_cs_Chk(CSChk_Net),
    m_cs_ChkTLS(false),
    m_onlyIfCachedMinSize(1024*1024),
-   m_onlyIfCachedMinFrac(1.0)
+   m_onlyIfCachedMinFrac(1.0),
+   m_httpcc(false),
+   m_qfsredir(true)
 {}
 
 
@@ -733,6 +736,8 @@ bool Cache::Config(const char *config_filename, const char *parameters, XrdOucEn
          loff += snprintf(buff + loff, sizeof(buff) - loff, "       pfc.hdfsmode hdfsbsize %lld\n", m_configuration.m_hdfsbsize);
       }
 
+      loff += snprintf(buff + loff, sizeof(buff) - loff, "       pfc.writethrough %s\n", m_configuration.m_write_through ? "on" : "off");
+
       if (m_configuration.m_username.empty())
       {
          char unameBuff[256];
@@ -742,6 +747,15 @@ bool Cache::Config(const char *config_filename, const char *parameters, XrdOucEn
       else
       {
          loff += snprintf(buff + loff, sizeof(buff) - loff, "       pfc.user %s\n", m_configuration.m_username.c_str());
+      }
+
+      if (m_configuration.m_httpcc)
+      {
+         loff += snprintf(buff + loff, sizeof(buff) - loff, "       pfc.httpcc on\n");
+      }
+      if (m_configuration.m_qfsredir)
+      {
+         loff += snprintf(buff + loff, sizeof(buff) - loff, "       pfc.qfsredir on\n");
       }
 
       m_log.Say(buff);
@@ -1110,6 +1124,25 @@ bool Cache::ConfigParameters(std::string part, XrdOucStream& config, TmpConfigur
          }
       }
    }
+   else if ( part == "writethrough" )
+   {
+      const char *val = cwg.GetWord();
+      if (!val || !cwg.HasLast())
+      {
+          m_log.Emsg("Config", "Error: pfc.writethrough requires a parameter.");
+          return false;
+      }
+
+      if (strncmp(val, "on", 2) == 0) {
+          m_configuration.m_write_through = true;
+      } else if (strncmp(val, "off", 3) == 0) {
+          m_configuration.m_write_through = false;
+      } else {
+          m_log.Emsg("ConfigParameters()",
+                     "Unknown value for pfc.writethrough:", val, "(valid values are 'on' or 'off')");
+          return false;
+      }
+   }
    else if ( part == "flush" )
    {
       tmpc.m_flushRaw = cwg.GetWord();
@@ -1160,6 +1193,31 @@ bool Cache::ConfigParameters(std::string part, XrdOucStream& config, TmpConfigur
          {
             m_log.Emsg("Config", "Error: onlyifcached stanza contains unknown directive", p);
          }
+      }
+   }
+   else if ( part == "httpcc" )
+   {
+      const char* val = cwg.GetWord();
+      if (!strcmp(val, "on")) {
+         m_configuration.m_httpcc = true;
+      }
+      else if (strcmp(val, "off")) {
+          m_log.Emsg("Config", "Error: httpcc pramater can only have values [off|on]", val);
+      }
+   }
+   else if ( part == "qfsredir" )
+   {
+      const char* val = cwg.GetWord();
+      if (!strcmp(val, "on")) {
+         m_configuration.m_qfsredir = true;
+      }
+      else if (!strcmp(val, "off")) {
+         m_configuration.m_qfsredir = false;
+      }
+      else
+      {
+          m_log.Emsg("Config", "Error: qfsredir pramater can only have values [off|on]", val);
+          return false;
       }
    }
    else

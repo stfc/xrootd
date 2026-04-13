@@ -289,7 +289,7 @@ namespace
       //------------------------------------------------------------------------
       // Job progress
       //------------------------------------------------------------------------
-      virtual void JobProgress( uint16_t jobNum,
+      virtual void JobProgress( uint32_t jobNum,
                                 uint64_t bytesProcessed,
                                 uint64_t bytesTotal )
       {
@@ -300,7 +300,7 @@ namespace
       //------------------------------------------------------------------------
       // Determine whether the job should be canceled
       //------------------------------------------------------------------------
-      virtual bool ShouldCancel( uint16_t jobNum ) { return pCancel; }
+      virtual bool ShouldCancel( uint32_t jobNum ) { return pCancel; }
 
     private:
       bool pCancel;
@@ -550,7 +550,7 @@ void FileCopyTest::CopyTestFunc( bool thirdParty )
   std::vector<xattr_t> attrs; attrs.push_back( xattr_t( "foo", "bar" ) );
   std::vector<XAttrStatus> result;
   EXPECT_XRDST_OK( lf.SetXAttr( attrs, result ) );
-  EXPECT_EQ( result.size(), 1u );
+  ASSERT_EQ( result.size(), 1u );
   EXPECT_XRDST_OK( result.front().status );
   EXPECT_XRDST_OK( lf.Close() );
 
@@ -568,7 +568,7 @@ void FileCopyTest::CopyTestFunc( bool thirdParty )
   // now test if the xattrs were preserved
   std::vector<XAttr> xattrs;
   EXPECT_XRDST_OK( fs.ListXAttr( targetPath, xattrs ) );
-  EXPECT_EQ( xattrs.size(), 1u );
+  ASSERT_EQ( xattrs.size(), 1u );
   XAttr &xattr = xattrs.front();
   EXPECT_XRDST_OK( xattr.status );
   EXPECT_EQ( xattr.name, "foo" );

@@ -8,13 +8,13 @@ on:
     paths:
       - setup.py
       - pyproject.toml
-      - 'bindings/**'
+      - 'python/**'
     tags-ignore:
   pull_request:
     paths:
       - setup.py
       - pyproject.toml
-      - 'bindings/**'
+      - 'python/**'
   workflow_dispatch:
 
 concurrency:
@@ -39,7 +39,7 @@ jobs:
       run: dnf install -y git krb5-devel libuuid-devel openssl-devel
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -68,7 +68,7 @@ jobs:
         ${PYTHON} -c 'from XRootD import client; print(client.FileSystem("root://localhost"))'
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: python-${{ matrix.version }}
         path: wheelhouse

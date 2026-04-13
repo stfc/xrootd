@@ -15,10 +15,7 @@ endif()
 add_definitions( -D_LARGEFILE_SOURCE -D_LARGEFILE64_SOURCE -D_FILE_OFFSET_BITS=64 )
 define_default( LIBRARY_PATH_PREFIX "lib" )
 
-#-------------------------------------------------------------------------------
-# Enable c++14
-#-------------------------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ Standard")
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ Standard")
 set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
 
 if( ENABLE_ASAN )
@@ -39,6 +36,12 @@ add_compile_options(
   -Wno-unused-parameter
   -Wno-vla
 )
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
+  add_compile_options(
+    -Wno-array-bounds
+  )
+endif()
 
 # Disable some warnings currently triggered with Clang
 

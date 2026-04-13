@@ -34,6 +34,7 @@
 #include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/uio.h>
@@ -42,6 +43,7 @@
 #include "XrdPosix/XrdPosixLinkage.hh"
 #include "XrdPosix/XrdPosixXrootd.hh"
 #include "XrdPosix/XrdPosixXrootdPath.hh"
+#include "XrdSys/XrdSysStatx.hh"
 
 /******************************************************************************/
 /*                        G l o b a l   O b j e c t s                         */
@@ -928,6 +930,32 @@ int XrdPosix_Stat(const char *path, struct stat *buf)
           ? Xunix.Stat64(           path, (struct stat64 *)buf)
 #endif
           : Xroot.Stat(myPath, buf));
+}
+}
+
+extern "C"
+{
+int XrdPosix_Statx(int dirfd, const char *path, int flags,
+                   unsigned int mask, XrdSysStatx *stx)
+{
+  if (path && *path) {
+    char buff[2048];
+    if (char *myPath = XrootPath.URL(path, buff, sizeof(buff))) {
+      struct stat st{};
+
+      if (int ret = XrdPosix_Stat(myPath, &st))
+        return ret;
+
+      XrdSysStatxHelpers::Stat2Statx(st, *stx);
+      return 0;
+    }
+  }
+#ifdef SYS_statx
+  return syscall(SYS_statx, dirfd, path, flags, mask, stx);
+#else
+  errno = ENOSYS;
+  return -1;
+#endif
 }
 }
   

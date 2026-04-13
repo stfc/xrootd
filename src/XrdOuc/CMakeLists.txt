@@ -1,3 +1,10 @@
+find_package(nlohmann_json 3.10.2 QUIET)
+
+if(nlohmann_json_FOUND)
+  target_link_libraries(XrdUtils PUBLIC nlohmann_json::nlohmann_json)
+  target_compile_definitions(XrdUtils PUBLIC USE_SYSTEM_NLOHMANN_JSON)
+endif()
+
 target_sources(XrdUtils
   PRIVATE
     XrdOuca2x.cc         XrdOuca2x.hh
@@ -8,6 +15,7 @@ target_sources(XrdUtils
                          XrdOucCacheStats.hh
     XrdOucCallBack.cc    XrdOucCallBack.hh
                          XrdOucChkPnt.hh
+                         XrdOucCloneSeg.hh
     XrdOucCRC.cc         XrdOucCRC.hh
     XrdOucCRC32C.cc      XrdOucCRC32C.hh
     XrdOucECMsg.cc       XrdOucECMsg.hh
@@ -38,6 +46,7 @@ target_sources(XrdUtils
     XrdOucProg.cc        XrdOucProg.hh
     XrdOucPsx.cc         XrdOucPsx.hh
     XrdOucPup.cc         XrdOucPup.hh
+                         XrdOucRange.hh
     XrdOucReqID.cc       XrdOucReqID.hh
     XrdOucSHA3.cc        XrdOucSHA3.hh
     XrdOucSid.cc         XrdOucSid.hh

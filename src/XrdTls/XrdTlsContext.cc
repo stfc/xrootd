@@ -309,14 +309,6 @@ bool Setup_Flusher(XrdTlsContextImpl *pImpl, int flushT)
 // Versions >- 1.1 Do not need any callbacks as all threading functions are
 //                 internally defined to use native MT functions.
   
-#if OPENSSL_VERSION_NUMBER < 0x10100000L && defined(OPENSSL_THREADS)
-namespace
-{
-#define XRDTLS_SET_CALLBACKS 1
-#ifdef __solaris__
-extern "C" {
-#endif
-
 template<bool is32>
 struct tlsmix;
 
@@ -368,13 +360,6 @@ void sslTLS_lock(int mode, int n, const char *file, int line)
    if (mode & CRYPTO_LOCK) MutexVector[n].Lock();
       else                 MutexVector[n].UnLock();
 }
-#ifdef __solaris__
-}
-#endif
-}   // namespace
-#else
-#undef XRDTLS_SET_CALLBACKS
-#endif
 
 /******************************************************************************/
 /*                F i l e   L o c a l   D e f i n i t i o n s                 */
@@ -382,12 +367,8 @@ void sslTLS_lock(int mode, int n, const char *file, int line)
   
 namespace
 {
-// The following is the default cipher list. Note that for OpenSSL v1.0.2+ we
-// use the recommended cipher list from Mozilla. Otherwise, we use the dumber
-// less secure ciphers as older versions of openssl have issues with them. See
-// ssl-config.mozilla.org/#config=intermediate&openssl=1.0.2k&guideline=5.4
-//
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
+// The following is the default TLS cipher list. We use the recommended list from Mozilla:
+// https://ssl-config.mozilla.org/#server=apache&config=intermediate&openssl=1.1.0
 const char *sslCiphers = "ECDHE-ECDSA-AES128-GCM-SHA256:"
                          "ECDHE-RSA-AES128-GCM-SHA256:"
                          "ECDHE-ECDSA-AES256-GCM-SHA384:"
@@ -396,9 +377,6 @@ const char *sslCiphers = "ECDHE-ECDSA-AES128-GCM-SHA256:"
                          "ECDHE-RSA-CHACHA20-POLY1305:"
                          "DHE-RSA-AES128-GCM-SHA256:"
                          "DHE-RSA-AES256-GCM-SHA384";
-#else
-const char *sslCiphers = "ALL:!LOW:!EXP:!MD5:!MD2";
-#endif
 
 XrdSysMutex            dbgMutex, tlsMutex;
 XrdSys::RAtomic<bool>  initDbgDone{ false };
@@ -428,19 +406,6 @@ void InitTLS() // This is strictly a one-time call!
    ERR_load_BIO_strings();
 #endif
    ERR_load_crypto_strings();
-
-// Set callbacks if we need to do this
-//
-#ifdef XRDTLS_SET_CALLBACKS
-
-   int n =  CRYPTO_num_locks();
-   if (n > 0)
-      {MutexVector = new XrdSysMutex[n];
-       CRYPTO_set_locking_callback(sslTLS_lock);
-      }
-   CRYPTO_set_id_callback(sslTLS_id_callback);
-
-#endif
 }
 
 /******************************************************************************/
@@ -465,11 +430,7 @@ void Fatal(std::string *eMsg, const char *msg, bool sslmsg=false)
 
 const char *GetTlsMethod(const SSL_METHOD *&meth)
 {
-#if OPENSSL_VERSION_NUMBER > 0x1010000fL /* v1.1.0 */
   meth = TLS_method();
-#else
-  meth = SSLv23_method();
-#endif
   if (meth == 0) return "No negotiable TLS method available.";
   return 0;
 }
@@ -540,29 +501,46 @@ bool VerPaths(const char *cert, const char *pkey,
 
 extern "C"
 {
-int VerCB(int aOK, X509_STORE_CTX *x509P)
-{
-   if (!aOK)
-      {X509 *cert = X509_STORE_CTX_get_current_cert(x509P);
-       int depth  = X509_STORE_CTX_get_error_depth(x509P);
-       int err    = X509_STORE_CTX_get_error(x509P);
-       char name[512], info[1024];
-
-       X509_NAME_oneline(X509_get_subject_name(cert), name, sizeof(name));
-       snprintf(info,sizeof(info),"Cert verification failed for DN=%s",name);
-       XrdTls::Emsg("CertVerify:", info, false);
-
-       X509_NAME_oneline(X509_get_issuer_name(cert), name, sizeof(name));
-       snprintf(info,sizeof(info),"Failing cert issuer=%s", name);
-       XrdTls::Emsg("CertVerify:", info, false);
-
-       snprintf(info, sizeof(info), "Error %d at depth %d [%s]", err, depth,
-                                    X509_verify_cert_error_string(err));
-       XrdTls::Emsg("CertVerify:", info, true);
+/**
+ *
+ * OpenSSL peer-certificate verify callback
+ */
+int verifyPeerCB(int aOK, X509_STORE_CTX *x509P) {
+   if (!aOK) {
+      SSL *ssl = (SSL*)X509_STORE_CTX_get_ex_data(x509P, SSL_get_ex_data_X509_STORE_CTX_idx());
+      SSL_CTX *sslCtx = SSL_get_SSL_CTX(ssl);
+      XrdTlsContext *self = (XrdTlsContext*)SSL_CTX_get_ex_data(sslCtx, XrdTlsContext::ctxIndex);
+      bool LogVF = (self->GetParams()->opts & XrdTlsContext::logVF) != 0;
+      bool crlAllowMissingCA = (self->GetParams()->opts & XrdTlsContext::crlAM) != 0;
+      if (crlAllowMissingCA) {
+         int err = X509_STORE_CTX_get_error(x509P);
+         if (err == X509_V_ERR_UNABLE_TO_GET_CRL) {
+            X509_STORE_CTX_set_error(x509P, X509_V_OK);
+            return 1;
+         }
       }
+      if (LogVF) {
+         X509 *cert = X509_STORE_CTX_get_current_cert(x509P);
+         int depth  = X509_STORE_CTX_get_error_depth(x509P);
+         int err    = X509_STORE_CTX_get_error(x509P);
+         char name[512], info[1024];
 
+         X509_NAME_oneline(X509_get_subject_name(cert), name, sizeof(name));
+         snprintf(info,sizeof(info),"Cert verification failed for DN=%s",name);
+         XrdTls::Emsg("CertVerify:", info, false);
+
+         X509_NAME_oneline(X509_get_issuer_name(cert), name, sizeof(name));
+         snprintf(info,sizeof(info),"Failing cert issuer=%s", name);
+         XrdTls::Emsg("CertVerify:", info, false);
+
+         snprintf(info, sizeof(info), "Error %d at depth %d [%s]", err, depth,
+                                      X509_verify_cert_error_string(err));
+         XrdTls::Emsg("CertVerify:", info, true);
+      }
+   }
    return aOK;
 }
+
 }
   
 } // Anonymous namespace end
@@ -576,7 +554,9 @@ int VerCB(int aOK, X509_STORE_CTX *x509P)
 #define FATAL(msg) {Fatal(eMsg, msg); KILL_CTX(pImpl->ctx); return;}
 
 #define FATAL_SSL(msg) {Fatal(eMsg, msg, true); KILL_CTX(pImpl->ctx); return;}
-  
+
+int XrdTlsContext::ctxIndex = SSL_CTX_get_ex_new_index(0, NULL, NULL, NULL, NULL);
+
 XrdTlsContext::XrdTlsContext(const char *cert,  const char *key,
                              const char *caDir, const char *caFile,
                              uint64_t opts, std::string *eMsg)
@@ -599,11 +579,9 @@ XrdTlsContext::XrdTlsContext(const char *cert,  const char *key,
                             | SSL_OP_NO_SSLv2
                             | SSL_OP_NO_SSLv3
                             | SSL_OP_NO_COMPRESSION
+                            | SSL_OP_NO_RENEGOTIATION
 #ifdef SSL_OP_IGNORE_UNEXPECTED_EOF
                             | SSL_OP_IGNORE_UNEXPECTED_EOF
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10101000L
-                            | SSL_OP_NO_RENEGOTIATION
 #endif
                             ;
 
@@ -690,6 +668,9 @@ XrdTlsContext::XrdTlsContext(const char *cert,  const char *key,
 //
    if (pImpl->ctx == 0) FATAL_SSL("Unable to allocate TLS context!");
 
+   //Add the XrdTlsContext object as extra information for OpenSSL callback re-use
+   SSL_CTX_set_ex_data(pImpl->ctx, ctxIndex, this);
+
 // Always prohibit SSLv2 & SSLv3 as these are not secure.
 //
    SSL_CTX_set_options(pImpl->ctx, sslOpts);
@@ -714,7 +695,13 @@ XrdTlsContext::XrdTlsContext(const char *cert,  const char *key,
       SSL_CTX_set_verify_depth(pImpl->ctx, (vDepth ? vDepth : 9));
 
       bool LogVF = (opts & logVF) != 0;
-      SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, (LogVF ? VerCB : 0));
+      bool crlAllowMissingCA = (opts & crlAM) != 0;
+
+      if (crlAllowMissingCA || LogVF) {
+         SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, verifyPeerCB);
+      } else {
+         SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, 0);
+      }
 
       unsigned long xFlags = (opts & nopxy ? 0 : X509_V_FLAG_ALLOW_PROXY_CERTS);
       if (opts & crlON)
@@ -895,8 +882,6 @@ bool XrdTlsContext::isOK()
 
 void *XrdTlsContext::Session()
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
-
    EPNAME("Session");
    SSL *ssl;
 
@@ -945,6 +930,11 @@ void *XrdTlsContext::Session()
    //the reference counter of it. There is therefore no risk of double free...
    SSL_CTX_free(pImpl->ctx);
    pImpl->ctx = ctxnew->pImpl->ctx;
+
+   //Update ex_data to point to this (the surviving owner), not the
+   //cloned context which is about to be deleted.
+   SSL_CTX_set_ex_data(pImpl->ctx, ctxIndex, this);
+
    //In the destructor of XrdTlsContextImpl, SSL_CTX_Free() is
    //called if ctx is != 0. As this new ctx is used by the session
    //we just created, we don't want that to happen. We therefore set it to 0.
@@ -965,14 +955,6 @@ void *XrdTlsContext::Session()
    pImpl->crlMutex.UnLock();
    delete ctxold;
    return ssl;
-
-#else
-// If we did not compile crl refresh code, we can simply return the OpenSSL
-// session using our context. Otherwise, we need to see if we have a refreshed
-// context and if so, carry forward the X509_store to our original context.
-//
-   return SSL_new(pImpl->ctx);
-#endif
 }
   
 /******************************************************************************/
@@ -1065,8 +1047,6 @@ void XrdTlsContext::SetDefaultCiphers(const char *ciphers)
 
 bool XrdTlsContext::SetCrlRefresh(int refsec)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10002000L
-
    pthread_t tid;
    int       rc;
 
@@ -1103,16 +1083,6 @@ bool XrdTlsContext::SetCrlRefresh(int refsec)
 // All done
 //
    return true;
-
-#else
-// We use features present on OpenSSL 1.02 and above to implement crl refresh.
-// Older version are too difficult to deal with. Issue a message if this
-// feature is being enabled on an old version.
-//
-   XrdTls::Emsg("CrlRefresh:", "Refreshing CRLs only supported in "
-                "OpenSSL version >= 1.02; CRL refresh disabled!", false);
-   return false;
-#endif
 }
   
 /******************************************************************************/
@@ -1142,10 +1112,15 @@ bool XrdTlsContext::newHostCertificateDetected() {
 }
 
 void XrdTlsContext::SetTlsClientAuth(bool setting) {
-    bool LogVF = (pImpl->Parm.opts & logVF) != 0;
     if (setting)
        {pImpl->Parm.opts &= ~clcOF;
-        SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, (LogVF ? VerCB : 0));
+       bool LogVF = (pImpl->Parm.opts & logVF) != 0;
+       bool crlAllowMissingCA = (pImpl->Parm.opts & crlAM) != 0;
+
+       if (LogVF || crlAllowMissingCA)
+          SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, verifyPeerCB);
+       else
+          SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_PEER, 0);
        } else
        {pImpl->Parm.opts |= clcOF;
         SSL_CTX_set_verify(pImpl->ctx, SSL_VERIFY_NONE, 0);

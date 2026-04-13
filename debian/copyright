@@ -73,7 +73,7 @@ License: LGPL-3 and BSD-3-clause-modified
  OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 Files:
- bindings/python/*
+ python/*
  src/XrdApps/XrdClProxyPlugin/*
  src/XrdApps/XrdClRecordPlugin/*
  src/XrdCeph/*
@@ -203,7 +203,6 @@ License: Expat
 Files: src/XrdXml/tinyxml/*
 Copyright:
  2000-2006 Lee Thomason (www.grinninglizard.com)
-Comment: Not used in debian build, libtinyxml-dev used instead.
 License: zlib/libpng
 
 Files: debian/*

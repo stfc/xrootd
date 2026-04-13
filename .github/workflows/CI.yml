@@ -5,12 +5,6 @@ permissions:
 
 on:
   push:
-    branches-ignore:
-      - master
-    paths:
-      - .github/workflows/CI.yml
-      - 'src/**'
-      - 'tests/**'
     tags-ignore:
   pull_request:
   workflow_dispatch:
@@ -52,14 +46,15 @@ jobs:
           g++ \
           git \
           gtest-dev \
-          isa-l-dev \
           json-c-dev \
           krb5 \
           krb5-dev \
           krb5-server \
           libxml2-dev \
+          libzip-dev \
           linux-headers \
           make \
+          nlohmann-json \
           openssl \
           openssl-dev \
           procps \
@@ -69,13 +64,12 @@ jobs:
           python3-dev \
           readline-dev \
           sudo \
-          tinyxml-dev \
           util-linux-dev \
           uuidgen \
           zlib-dev
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -108,7 +102,7 @@ jobs:
         dnf config-manager --set-enabled powertools
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -144,7 +138,7 @@ jobs:
         dnf config-manager --set-enabled crb
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -165,7 +159,7 @@ jobs:
         tests/post-install.sh
         tests/check-headers.sh
 
-  alma10beta:
+  alma10:
     name: Alma 10
     runs-on: ubuntu-latest
     container: almalinux:10
@@ -180,7 +174,7 @@ jobs:
         dnf config-manager --set-enabled crb
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -206,16 +200,24 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora
 
+    strategy:
+      matrix:
+        compiler: [ 'gcc', 'clang' ]
+        config: [ 'Debug', 'Release' ]
+      fail-fast: false
+
     env:
-      CMAKE_GENERATOR: Ninja
+      CC: ${{ matrix.compiler }}
       CMAKE_ARGS: "-DCMAKE_INSTALL_PREFIX=/usr;-DCMAKE_INSTALL_RPATH='$ORIGIN/../$LIB'"
+      CMAKE_BUILD_TYPE: ${{ matrix.config }}
+      CMAKE_GENERATOR: Ninja
 
     steps:
     - name: Install dependencies
-      run: dnf install -y dnf-plugins-core git ninja-build rpmdevtools
+      run: dnf install -y dnf-plugins-core git ninja-build rpmdevtools ${{ matrix.compiler }}
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -226,7 +228,7 @@ jobs:
       run: dnf builddep -y --define 'with_ceph 1' xrootd.spec
 
     - name: Build and Test with CTest
-      run: sudo -E -u runner ctest -VV -S test.cmake
+      run: sudo -E -u runner env CC=${CC} CXX=${CC/g*/g++} ctest -VV -S test.cmake
 
     - name: Install with CMake
       run: cmake --install build
@@ -243,13 +245,16 @@ jobs:
       matrix:
         os: [ '24.04', '24.04-arm' ]
         compiler: [ 'gcc', 'clang' ]
+        config: [ 'Debug', 'Release' ]
+      fail-fast: false
 
     runs-on: ubuntu-${{ matrix.os }}
 
     env:
       CC: ${{ matrix.compiler }}
-      DEBIAN_FRONTEND: noninteractive
+      CMAKE_BUILD_TYPE: ${{ matrix.config }}
       CMAKE_ARGS: '-DINSTALL_PYTHON_BINDINGS=0;-DCMAKE_INSTALL_PREFIX=/usr'
+      DEBIAN_FRONTEND: noninteractive
 
     steps:
     - name: Install development tools
@@ -258,7 +263,7 @@ jobs:
         sudo apt install -y build-essential devscripts equivs git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -275,7 +280,7 @@ jobs:
       run: |
         sudo python3 -m pip install \
           --target /usr/lib/python3/dist-packages \
-          --use-pep517 --verbose build/bindings/python
+          --use-pep517 --verbose build/python
 
     - name: Run post-install tests
       run: |
@@ -284,7 +289,7 @@ jobs:
 
   macos:
     name: macOS
-    runs-on: macos-15
+    runs-on: macos-26
 
     env:
       CC: clang
@@ -297,15 +302,15 @@ jobs:
       run: sudo sed -i -e "s/localhost/localhost $(hostname)/g" /etc/hosts
 
     - name: Install dependencies with Homebrew
-      run: brew install davix googletest python-setuptools
+      run: brew install googletest libzip nlohmann-json python-setuptools
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
     - name: Build and Test with CTest
-      run: ctest -VV --repeat until-pass:3 -S test.cmake
+      run: ctest -VV -S test.cmake
 
     - name: Install with CMake
       run: sudo cmake --install build

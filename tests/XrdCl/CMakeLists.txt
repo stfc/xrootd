@@ -1,4 +1,5 @@
 add_executable(xrdcl-unit-tests
+  XrdClEnv.cc
   XrdClURL.cc
   XrdClPoller.cc
   XrdClSocket.cc
@@ -6,7 +7,7 @@ add_executable(xrdcl-unit-tests
   )
 
 target_link_libraries(xrdcl-unit-tests
-  XrdTestUtils GTest::GTest GTest::Main)
+  XrdTestUtils GTest::gtest GTest::gtest_main)
 
 gtest_discover_tests(xrdcl-unit-tests TEST_PREFIX XrdCl:: 
   PROPERTIES DISCOVERY_TIMEOUT 10)
@@ -30,7 +31,7 @@ add_executable(xrdcl-cluster-tests
   )
 
 target_link_libraries(xrdcl-cluster-tests
-  XrdTestUtils GTest::GTest GTest::Main)
+  XrdTestUtils GTest::gtest GTest::gtest_main)
 
 gtest_discover_tests(xrdcl-cluster-tests TEST_PREFIX XrdCl::
   PROPERTIES DEPENDS XRootD_Cluster FIXTURES_REQUIRED XRootD_Cluster DISCOVERY_TIMEOUT 10)
@@ -38,9 +39,11 @@ gtest_discover_tests(xrdcl-cluster-tests TEST_PREFIX XrdCl::
 # tests to be run in serial, otherwise they are problematic
 set(SERIAL_TESTS_FILES
   XrdClFileTest.cc
+  XrdClFileClone.cc
   XrdClFileCopyTest.cc
   XrdClFileSystemTest.cc
   XrdClOperationsWorkflowTest.cc
+  XrdClTTLManyStreams.cc
 )
 
 # create a separate executable target for each "problematic" test suite
@@ -48,7 +51,7 @@ foreach(i ${SERIAL_TESTS_FILES})
   add_executable(${i}-tests ${i} IdentityPlugIn.cc)
 
   target_link_libraries(${i}-tests
-    XrdTestUtils GTest::GTest GTest::Main)
+    XrdTestUtils GTest::gtest GTest::gtest_main)
 
   gtest_discover_tests(${i}-tests TEST_PREFIX XrdCl::
     PROPERTIES DEPENDS XRootD_Cluster FIXTURES_REQUIRED XRootD_Cluster RUN_SERIAL 1 DISCOVERY_TIMEOUT 10)

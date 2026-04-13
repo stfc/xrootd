@@ -44,8 +44,8 @@ target_link_libraries(${XrdAccSciTokens}
 
 target_include_directories(${XrdAccSciTokens}
   PRIVATE
-    vendor/inih
-    vendor/picojson
+    ${CMAKE_SOURCE_DIR}/vendor/inih
+    ${CMAKE_SOURCE_DIR}/vendor/picojson
     ${SCITOKENS_CPP_INCLUDE_DIR}
 )
 

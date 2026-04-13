@@ -38,23 +38,17 @@
 #ifndef XRDHTTPREQ_HH
 #define	XRDHTTPREQ_HH
 
-
-#include "XrdOuc/XrdOucString.hh"
-
 #include "XProtocol/XProtocol.hh"
-#include "XrdXrootd/XrdXrootdBridge.hh"
 #include "XrdHttpChecksumHandler.hh"
 #include "XrdHttpReadRangeHandler.hh"
+#include "XrdOuc/XrdOucString.hh"
+#include "XrdXrootd/XrdXrootdBridge.hh"
+#include "XrdHttpMonState.hh"
 
-#include <vector>
-#include <string>
+#include <chrono>
 #include <map>
-
-//#include <libxml/parser.h>
-//#include <libxml/tree.h>
-
-
-
+#include <string>
+#include <vector>
 
 struct DirListInfo {
   std::string path;
@@ -77,8 +71,9 @@ public:
   // processing the request
 
   /// These are the HTTP/DAV requests that we support
-
-  enum ReqType: int {
+  // Any changes here should also reflect in XrdHttpMon::verbCountersSchema to capture statistics of requests by verb
+  // The count and order or verbs listed should be consistent with the monitoring counters
+  enum ReqType : int {
     rtUnset = -1,
     rtUnknown = 0,
     rtMalformed,
@@ -91,12 +86,19 @@ public:
     rtPROPFIND,
     rtMKCOL,
     rtMOVE,
-    rtPOST
+    rtPOST,
+    rtCOPY,
+    rtCount
   };
 
 private:
   // HTTP response parameters to be sent back to the user
-  int httpStatusCode;
+  int httpStatusCode{-1};
+
+  // Stores the first response that was sent as part of the Response Header
+  // Used when staus code is updated after for e.g. Chunked Response + X-Transfer-Status request
+  int initialStatusCode{-1};
+
   // HTTP Error code for the response
   // e.g. 8.1, 8.3.1, etc.
   // https://twiki.cern.ch/twiki/bin/view/LCG/WebdavErrorImprovement
@@ -188,20 +190,18 @@ private:
 
   // Set the age header from the file modification time
   void addAgeHeader(std::string & headers);
-  /**
-   * Extract a comma separated list of checksums+metadata into a vector
-   * @param checksumList the list like "0:sha1, 1:adler32, 2:md5"
-   * @param extractedChecksum the vector with the elements {0:sha,1:adler32,2:md5}
-   */
-  static void extractChecksumFromList(const std::string & checksumList, std::vector<std::string> & extractedChecksum);
+
+  // Set the ETag header containing union of stat.st_ino and stat.st_dev
+  // See XrdXrootdProtocol::StatGen() for the full definition of etag value.
+  void addETagHeader(std::string & headers);
 
   /**
-   * Determine the XRootD-compliant checksum algorithm from the user digest string
-   * @param userDigest the string containing the digest names. e.g: adler32, md5;q=0.4, md5
-   * @param xrootdChecksums the vector that will contain the corresponding xrootd-compliant names
-   * These xrootd-compliant names are located in the static XrdOucString convert_digest_name(const std::string &rfc_name_multiple) function
+   * Convenient function to prepare the checksum query to the bridge
+   * @param outCksum the checksum that will be requested
+   * @param outResourceDigestOpaque the URL that will contain the resource and the digest type to request to the bridge as an opaque
+   * @return 0 if successful, -1 if not
    */
-  static void determineXRootDChecksumFromUserDigest(const std::string & userDigest, std::vector<std::string> & xrootdChecksums);
+  int prepareChecksumQuery(XrdHttpChecksumHandler::XrdHttpChecksumRawPtr & outCksum, XrdOucString & outResourceDigestOpaque);
 
 public:
   XrdHttpReq(XrdHttpProtocol *protinstance, const XrdHttpReadRangeHandler::Configuration &rcfg) :
@@ -221,6 +221,16 @@ public:
   virtual ~XrdHttpReq();
 
   virtual void reset();
+
+  int getInitialStatusCode() { return initialStatusCode;}
+  int getHttpStatusCode() { return httpStatusCode;}
+
+  void setHttpStatusCode(int code) {
+      httpStatusCode = code;
+      if (initialStatusCode < 0 && code >= 200 ) { 
+        initialStatusCode = code;
+      }
+  }
 
   /// Parse the header
   int parseLine(char *line, int len);
@@ -292,7 +302,7 @@ public:
   std::string destination;
 
   /// The requested digest type
-  std::string m_req_digest;
+  std::string m_want_digest;
 
   /// The checksum that was ran for this request
   XrdHttpChecksumHandler::XrdHttpChecksumRawPtr m_req_cksum = nullptr;
@@ -334,6 +344,7 @@ public:
   bool final; //!< true -> final result
 
   // The latest stat info got from the xrd layer
+  long long etagval;
   long long filesize;
   long fileflags;
   long filemodtime;
@@ -354,9 +365,16 @@ public:
 
   std::string m_origin;
 
+  std::chrono::steady_clock::time_point startTime = std::chrono::steady_clock::time_point::min();
 
+  /// Repr-Digest map where the key is the digest name and the value is the base64 encoded digest value
+  std::map<std::string,std::string> m_repr_digest;
 
+  /// Want-Repr-Digest map where the key is the digest name and the value is
+  /// the preference (between 0 and 9)
+  std::map<std::string,uint8_t> m_want_repr_digest;
 
+  XrdHttpMonState monState;
 
   /// Crunch an http request.
   /// Return values:

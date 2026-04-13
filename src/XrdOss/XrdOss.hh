@@ -33,15 +33,19 @@
 #include <dirent.h>
 #include <cerrno>
 #include <cstdint>
+#include <string>
 #include <strings.h>
 #include <sys/stat.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <cstring>
+#include <vector>
 
 #include "XrdOss/XrdOssVS.hh"
 #include "XrdOuc/XrdOucIOVec.hh"
+#include "XrdOuc/XrdOucRange.hh"
 
+struct XrdOucCloneSeg;
 class XrdOucEnv;
 class XrdSysLogger;
 class XrdSfsAio;
@@ -58,10 +62,11 @@ class XrdSfsAio;
 //! oriented requests. It is instantiated for each file/dir to be opened.
 //! The object is obtained by calling newDir() or newFile() in class XrdOss.
 //! This allows flexibility on how to structure an oss plugin.
-  
+
 class XrdOssDF
 {
 public:
+friend class XrdOssArcDF;
 
 /******************************************************************************/
 /*            D i r e c t o r y   O r i e n t e d   M e t h o d s             */
@@ -109,6 +114,29 @@ virtual int     StatRet(struct stat *buff) {return -ENOTSUP;}
 /******************************************************************************/
 /*                 F i l e   O r i e n t e d   M e t h o d s                  */
 /******************************************************************************/
+
+//-----------------------------------------------------------------------------
+//! Clone contents of a file from another file.
+//!
+//! @param  srcFile - Reference to the file to used to clone contents of this
+//!                   file.
+//!
+//! @return 0 upon success or -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual int     Clone(XrdOssDF& srcFile) {return -ENOTSUP;}
+
+//-----------------------------------------------------------------------------
+//! Clone contents of a file from one or more oher files.
+//!
+//! @param  cVec  - A vector of struct XrdOucCloneSeg describing the action.
+//!
+//! @return 0 upon success or -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual int     Clone(const std::vector<XrdOucCloneSeg> &cVec)
+                    {return -ENOTSUP;}
+
 //-----------------------------------------------------------------------------
 //! Change file mode settings.
 //!
@@ -275,10 +303,22 @@ virtual int     pgWrite(XrdSfsAio* aioparm, uint64_t opts);
 //! @param  offset  - The offset where the read is to start.
 //! @param  size    - The number of bytes to pre-read.
 //!
-//! @return 0 upon success or -errno or -osserr (see XrdOssError.hh).
+//! @return >= 0      When 0, the request was ignored; otherwise, it has been accepted.
+//! @return < 0       Failed with -errno or -osserr (see XrdOssError.hh).
 //-----------------------------------------------------------------------------
 
 virtual ssize_t Read(off_t offset, size_t size) {return (ssize_t)-EISDIR;}
+
+//-----------------------------------------------------------------------------
+//! Preread a list of file blocks into the file system cache.
+//!
+//! @param  rlist   - A list of byte ranges to pre-read.
+//!
+//! @return >= 0      When 0, the request was ignored; otherwise, it has been accepted.
+//! @return < 0       Failed with -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual ssize_t Read(XrdOucRangeList& rlist);
 
 //-----------------------------------------------------------------------------
 //! Read file bytes into a buffer.
@@ -404,6 +444,9 @@ uint16_t        DFType() {return dfType;}
 //!                                Response: Pointer to XrdOucChkPnt object.
 //!                  Fctl_utimes - Set atime and mtime (no response).
 //!                                Argument: struct timeval tv[2]
+//!                  Fctl_setFD  - Set file descriptor for unopened file.
+//!                                Argument: pointer to int file descriptor
+//!                  Fctl_QFinfo - Return special file information.
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  resp   - Where the response is to be set. The caller must call
@@ -414,8 +457,25 @@ uint16_t        DFType() {return dfType;}
 
 static const int Fctl_ckpObj = 0;
 static const int Fctl_utimes = 1;
+static const int Fctl_setFD  = 2; // alen = sizeof(int), args->int
+static const int Fctl_QFinfo = 3;
 
 virtual int     Fctl(int cmd, int alen, const char *args, char **resp=0);
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding
+//! directory or file error (see also XrdOss::getErrMsg()).
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return false;}
 
 //-----------------------------------------------------------------------------
 //! Return the underlying file descriptor.
@@ -466,6 +526,7 @@ short       rsvd;    // Reserved
 #define XRDOSS_mkpath  0x01
 #define XRDOSS_new     0x02
 #define XRDOSS_Online  0x04
+#define XRDOSS_coloc   0x08
 #define XRDOSS_isPFN   0x10
 #define XRDOSS_isMIG   0x20
 #define XRDOSS_setnoxa 0x40
@@ -480,6 +541,7 @@ short       rsvd;    // Reserved
 #define XRDOSS_HASNAIO 0x0000000000000020ULL
 #define XRDOSS_HASRPXY 0x0000000000000040ULL
 #define XRDOSS_HASXERT 0x0000000000000080ULL
+#define XRDOSS_HASFICL 0x0000000000000100ULL
 
 // Options that can be passed to Stat()
 //
@@ -490,11 +552,12 @@ short       rsvd;    // Reserved
 // Commands that can be passed to FSctl
 //
 #define XRDOSS_FSCTLFA 0x0001
-  
+#define XRDOSS_FSCTLFS 0x0002
+
 /******************************************************************************/
 /*                          C l a s s   X r d O s s                           */
 /******************************************************************************/
-  
+
 class XrdOss
 {
 public:
@@ -549,6 +612,8 @@ virtual void      Connect(XrdOucEnv &env);
 //! @param  mode   - The new file mode setting.
 //! @param  env    - Reference to environmental information.
 //! @param  opts   - Create options:
+//!                  XRDOSS_coloc  - Colocate file using the URL encoded
+//!                                  path in env "oss.coloc"
 //!                  XRDOSS_mkpath - create dir path if it does not exist.
 //!                  XRDOSS_new    - the file must not already exist.
 //!                  oflags<<8     - open flags shifted 8 bits to the left/
@@ -589,6 +654,7 @@ virtual uint64_t  Features();
 //!
 //! @param  cmd    - The operation to be performed:
 //!                  XRDOSS_FSCTLFA - Perform proxy file attribute operation
+//!                  XRDOSS_FSCTLFS - Perform proxy file system    operation
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  resp   - Where the response is to be set, if any.
@@ -597,6 +663,21 @@ virtual uint64_t  Features();
 //-----------------------------------------------------------------------------
 
 virtual int       FSctl(int cmd, int alen, const char *args, char **resp=0);
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding error
+//! returned by any method in this class.
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return false;}
 
 //-----------------------------------------------------------------------------
 //! Initialize the storage system V1 (deprecated).

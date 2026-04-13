@@ -83,6 +83,12 @@ namespace XrdCl
       virtual bool RemoveSocket( Socket *socket );
 
       //------------------------------------------------------------------------
+      //! Disables further callbacks to the socket's event handler. If callback
+      //! is currently running wait for it, unless it is the current thread.
+      //------------------------------------------------------------------------
+      virtual void ShutdownEvents( Socket *socket );
+
+      //------------------------------------------------------------------------
       //! Notify the handler about read events
       //!
       //! @param socket  the socket
@@ -92,7 +98,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       virtual bool EnableReadNotification( Socket  *socket,
                                            bool     notify,
-                                           uint16_t timeout = 60 );
+                                           time_t   timeout = 60 );
 
       //------------------------------------------------------------------------
       //! Notify the handler about write events
@@ -104,7 +110,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       virtual bool EnableWriteNotification( Socket  *socket,
                                             bool     notify,
-                                            uint16_t timeout = 60);
+                                            time_t   timeout = 60);
 
       //------------------------------------------------------------------------
       //! Check whether the socket is registered with the poller

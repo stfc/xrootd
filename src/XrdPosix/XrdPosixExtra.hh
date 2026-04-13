@@ -33,9 +33,12 @@
 /******************************************************************************/
 
 #include <cstdint>
+#include <string>
 #include <unistd.h>
 #include <vector>
 #include <sys/types.h>
+
+#include "XrdOuc/XrdOucCache.hh"
 
 class XrdPosixCallBackIO;
 
@@ -46,6 +49,45 @@ class XrdPosixCallBackIO;
 class XrdPosixExtra
 {
 public:
+
+//-----------------------------------------------------------------------------
+//! Perform file oriented control operation (i.e. a query).
+//!
+//! @param  fildes  - Posix file descriptor of associated file.
+//! @param  opc     - The requested operation (e.g. QFinfo).
+//! @param  args    - The arguments (this is not necessarily a URL)
+//! @param  resp    - Where the result is to be placed.
+//!
+//! @return >= 0    - Success, resp holds the response data.
+//! @return  < 0      errno hold reason for failure.
+//!
+//! @note This call is routed via the cache if file is cache enabled using
+//!       the associated CacheIO object returned by the cache attach call..
+//-----------------------------------------------------------------------------
+
+static int      Fctl(int fildes, XrdOucCacheOp::Code opc,
+                     const std::string& args, std::string& resp);
+
+//-----------------------------------------------------------------------------
+//! Perform file system oriented control operation (i.e. a query).
+//!
+//! @param  opc     - The requested operation (e.g. QFSinfo).
+//! @param  args    - The arguments (this should be a URL).
+//! @param  resp    - Where the result is to be placed.
+//! @param  viaCache- False -> Bypass calling any cache using URL in args.
+//!                   True  -> Use Cache object API if cache enabled.
+//!                            Otherwise, assume viaCache is false;
+//! @param  viaRedir- False -> Send request directly to endpoint.
+//!                   True  -> If endpoint is a redirector, send request
+//!                            to the redirected endpoint (i.e. via redirect)
+//!
+//! @return >= 0    - Success, resp holds the response data.
+//! @return  < 0      errno hold reason for failure.
+//-----------------------------------------------------------------------------
+
+static int      FSctl(XrdOucCacheOp::Code opc,
+                      const std::string& args, std::string& resp,
+                      bool viaCache=false, bool viaRedir=false);
 
 //-----------------------------------------------------------------------------
 //! Read file pages into a buffer and return corresponding checksums.
@@ -94,8 +136,39 @@ static ssize_t pgWrite(int fildes, void* buffer, off_t offset, size_t wrlen,
                        std::vector<uint32_t> &csvec, uint64_t opts=0,
                        XrdPosixCallBackIO *cbp=0);
 
+
+//------------------------------------------------------------------------
+//! Preread a range of bytes.
+//!
+//! @param fildes   - File descriptor
+//!                   The file descriptor must refer to an open file.
+//! @param offs     - The offset at which to start the preread.
+//! @param size     - The numbert of bytes to preread.
+//!
+//! @return    0      Request accepted.
+//! @return  < 0      Request rejected, errno hold reason for failure.
+//------------------------------------------------------------------------
+
+static int     PreRead(int fildes, off_t offs, int size);
+
+//------------------------------------------------------------------------
+//! Preread a list of byte ranges in one operation
+//!
+//! @param fildes   - File descriptor
+//!                   The file descriptor must refer to an open file.
+//! @param rlist    - list of the byte ranges to preread.
+//!                   The default maximum size is 2097136 bytes and
+//!                   the default maximum number of request is 1024.
+//!                   Be aware the the server may support a different
+//!                   combination and may be queried for its defaults.
+//!
+//! @return    0      Request accepted.
+//! @return  < 0      Request rejected, errno hold reason for failure.
+//------------------------------------------------------------------------
+
+static int     PreRead(int fildes, XrdOucRangeList& rlist);
+
                XrdPosixExtra() {}
               ~XrdPosixExtra() {}
-
 };
 #endif

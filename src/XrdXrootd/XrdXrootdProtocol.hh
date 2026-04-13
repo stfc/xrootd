@@ -241,7 +241,7 @@ private:
 enum RD_func {RD_chmod = 0, RD_chksum,  RD_dirlist, RD_locate, RD_mkdir,
               RD_mv,        RD_prepare, RD_prepstg, RD_rm,     RD_rmdir,
               RD_stat,      RD_trunc,   RD_ovld,    RD_client,
-              RD_write,     RD_open1,   RD_open2,   RD_open3,  RD_open4,
+              RD_openw,     RD_open1,   RD_open2,   RD_open3,  RD_open4,
 	      RD_Num};
 
        int   do_Auth();
@@ -251,6 +251,7 @@ enum RD_func {RD_chmod = 0, RD_chksum,  RD_dirlist, RD_locate, RD_mkdir,
        int   do_Chmod();
        int   do_CKsum(int canit);
        int   do_CKsum(char *algT, const char *Path, char *Opaque);
+       int   do_Clone();
        int   do_Close();
        int   do_Dirlist();
        int   do_DirStat(XrdSfsDirectory *dp, char *pbuff, char *opaque);

@@ -30,8 +30,10 @@
 #include <cctype>
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <string>
 #include <sys/time.h>
+#include <vector>
 
 #include "XrdSfs/XrdSfsInterface.hh"
 #include "XrdSfs/XrdSfsFlags.hh"
@@ -39,6 +41,7 @@
 #include "XrdSys/XrdSysPlatform.hh"
 #include "XrdSys/XrdSysTimer.hh"
 #include "XrdCks/XrdCksData.hh"
+#include "XrdOuc/XrdOucCloneSeg.hh"
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucReqID.hh"
 #include "XrdOuc/XrdOucTList.hh"
@@ -80,7 +83,7 @@
 #ifndef ETIME
 #define ETIME ETIMEDOUT
 #endif
-  
+
 /******************************************************************************/
 /*                               G l o b a l s                                */
 /******************************************************************************/
@@ -90,7 +93,7 @@ extern XrdSysTrace  XrdXrootdTrace;
 /******************************************************************************/
 /*                      L o c a l   S t r u c t u r e s                       */
 /******************************************************************************/
-  
+
 struct XrdXrootdSessID
        {unsigned int       Sid;
                  int       Pid;
@@ -154,11 +157,11 @@ struct tm *tmp;
 //          yymmdd:hhmmss.t
 static const char *startUP = getTime();
 }
- 
+
 /******************************************************************************/
 /*                               d o _ A u t h                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Auth()
 {
     XrdSecCredentials cred;
@@ -241,7 +244,7 @@ int XrdXrootdProtocol::do_Auth()
 /******************************************************************************/
 /*                               d o _ B i n d                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Bind()
 {
    XrdXrootdSessID *sp = (XrdXrootdSessID *)Request.bind.sessid;
@@ -367,11 +370,11 @@ int XrdXrootdProtocol::do_Bind()
 /*                                                                            */
 /* Resides in XrdXrootdXeqChkPnt.cc                                           */
 /******************************************************************************/
-  
+
 /******************************************************************************/
 /*                              d o _ c h m o d                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Chmod()
 {
    int mode, rc;
@@ -402,7 +405,7 @@ int XrdXrootdProtocol::do_Chmod()
 /******************************************************************************/
 /*                              d o _ C K s u m                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_CKsum(int canit)
 {
    char *opaque;
@@ -479,7 +482,7 @@ int XrdXrootdProtocol::do_CKsum(int canit)
 }
 
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_CKsum(char *algT, const char *Path, char *Opaque)
 {
    static char Space = ' ';
@@ -516,9 +519,96 @@ int XrdXrootdProtocol::do_CKsum(char *algT, const char *Path, char *Opaque)
 }
 
 /******************************************************************************/
+/*                              d o _ C l o n e                               */
+/******************************************************************************/
+
+int XrdXrootdProtocol::do_Clone()
+{
+   XrdXrootdFHandle fh(Request.clone.fhandle);
+   XrdXrootdFile* fP;
+   XrdSfsFile *dstFile, *srcFile = 0;
+   XrdOucErrInfo myError(Link->ID, Monitor.Did, clientPV);
+   int clVecNum, clVecLen = Request.header.dlen;
+   int currFH =- -1;
+
+// Make sure we can do this operation
+//
+   if (!(fsFeatures & XrdSfs::hasFICL))
+      return Response.Send(kXR_Unsupported, "file cloning is not supported");
+
+// Make sure target file is actually open
+//
+   if (!FTab || !(fP = FTab->Get(fh.handle)))
+      return Response.Send(kXR_FileNotOpen,
+                           "clone does not refer to an open dest file");
+   dstFile = fP->XrdSfsp;
+
+// Compute number of elements in the clone vector and make sure we have no
+// partial elements.
+//
+   clVecNum = clVecLen / sizeof(XrdProto::clone_list);
+   if ( (clVecNum <= 0) ||
+         (clVecNum*(int)sizeof(XrdProto::clone_list) != clVecLen) )
+      return Response.Send(kXR_ArgInvalid, "Clone vector is invalid");
+
+// Make sure that we can copy the clone vector to our local stack. We must impose
+// a limit on it's size. We do this to be able to reuse the data buffer to
+// prevent cross-cpu memory cache synchronization.
+//
+   if (clVecNum > XrdProto::maxClonesz)
+      return Response.Send(kXR_ArgTooLong, "Clone vector is too long");
+
+// Allocate a new clone vector
+//
+   std::vector<XrdOucCloneSeg> clVec(clVecNum);
+
+// Setup for clone vector initialisation
+//
+   XrdProto::clone_list* clList = (XrdProto::clone_list *)argp->buff;
+
+// Create new clone vector
+//
+   for (int i = 0; i < clVecNum; i++)
+       {fh.Set(clList[i].srcFH);
+        if (!srcFile || currFH != fh.handle)
+           {currFH = fh.handle;
+            if (!(fP = FTab->Get(currFH)))
+               return Response.Send(kXR_FileNotOpen,
+                                    "clone does not refer to an open src file");
+            srcFile = fP->XrdSfsp;
+           }
+
+        int fdNum;
+        if (srcFile->fctl(SFS_FCTL_GETFD, 0, myError) != SFS_OK)
+           {int ecode;
+            const char *eMsg = myError.getErrText(ecode);
+            const int rc = XProtocol::mapError(ecode);
+            return Response.Send((XErrorCode)rc, eMsg);
+           }
+           else fdNum = myError.getErrInfo();
+
+        if (fdNum<0)
+           return Response.Send(kXR_FileNotOpen,
+                                "clone does not refer to an open src file");
+
+        clVec[i].srcFD = fdNum;
+        n2hll(clList[i].srcOffs, clVec[i].srcOffs);
+        n2hll(clList[i].srcLen,  clVec[i].srcLen);
+        n2hll(clList[i].dstOffs, clVec[i].dstOffs);
+       }
+
+// Now execute the clone request
+//
+   int rc = dstFile->Clone(clVec);
+   if (SFS_OK != rc) return fsError(rc, 0, dstFile->error, 0, 0);
+
+   return Response.Send();
+}
+
+/******************************************************************************/
 /*                              d o _ C l o s e                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Close()
 {
    static XrdXrootdCallBack closeCB("close", XROOTD_MON_CLOSE);
@@ -534,7 +624,7 @@ int XrdXrootdProtocol::do_Close()
 // Find the file object
 //
    if (!FTab || !(fp = FTab->Get(fh.handle)))
-      return Response.Send(kXR_FileNotOpen, 
+      return Response.Send(kXR_FileNotOpen,
                           "close does not refer to an open file");
 
 // Serialize the file to make sure all references due to async I/O and parallel
@@ -602,7 +692,7 @@ int XrdXrootdProtocol::do_Close()
 /******************************************************************************/
 /*                            d o _ D i r l i s t                             */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Dirlist()
 {
    int bleft, rc = 0, dlen, cnt = 0;
@@ -673,7 +763,7 @@ int XrdXrootdProtocol::do_Dirlist()
 
 // Send the ending packet if we actually have one to send
 //
-   if (!rc) 
+   if (!rc)
       {if (ebuff == buff) rc = Response.Send();
           else {*(buff-1) = '\0';
                 rc = Response.Send((void *)ebuff, buff-ebuff);
@@ -786,7 +876,7 @@ int XrdXrootdProtocol::do_DirStat(XrdSfsDirectory *dp, char *pbuff,
 
 // Send the ending packet if we actually have one to send
 //
-   if (!rc) 
+   if (!rc)
       {if (XB.ebuff == buff) rc = Response.Send();
           else {*(buff-1) = '\0';
                 rc = Response.Send((void *)XB.ebuff, buff-XB.ebuff);
@@ -804,7 +894,7 @@ int XrdXrootdProtocol::do_DirStat(XrdSfsDirectory *dp, char *pbuff,
 /******************************************************************************/
 /*                            d o _ E n d s e s s                             */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Endsess()
 {
    XrdXrootdSessID *sp, sessID;
@@ -831,7 +921,7 @@ int XrdXrootdProtocol::do_Endsess()
 
 // Terminate the indicated session, if possible. This could also be a self-termination.
 //
-   if ((sessID.FD == 0 && sessID.Inst == 0) 
+   if ((sessID.FD == 0 && sessID.Inst == 0)
    ||  !(rc = Link->Terminate(0, sessID.FD, sessID.Inst))) return -1;
 
 // Trace this request
@@ -859,7 +949,7 @@ int XrdXrootdProtocol::do_Endsess()
 /******************************************************************************/
 /*                             d o _ g p F i l e                              */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_gpFile()
 {
 // int gopts, buffsz;
@@ -912,7 +1002,7 @@ int XrdXrootdProtocol::do_Locate()
    else if (*(fn+1))   {Path = fn+1;
                         doDig = (digFS && SFS_LCLROOT(Path));
                        }
-   else                {Path = 0; 
+   else                {Path = 0;
                         fn = XPList.Next()->Path();
                         fsctl_cmd |= SFS_O_TRUNC;
                        }
@@ -941,11 +1031,11 @@ int XrdXrootdProtocol::do_Locate()
    TRACEP(FS, "rc=" <<rc <<" locate " <<fn);
    return fsError(rc, (doDig ? 0 : XROOTD_MON_LOCATE), myError, Path, opaque);
 }
-  
+
 /******************************************************************************/
 /*                              d o _ L o g i n                               */
 /*.x***************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Login()
 {
    XrdXrootdSessID sessID;
@@ -1132,7 +1222,7 @@ int XrdXrootdProtocol::do_Login()
 /******************************************************************************/
 /*                              d o _ M k d i r                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Mkdir()
 {
    int mode, rc;
@@ -1165,7 +1255,7 @@ int XrdXrootdProtocol::do_Mkdir()
 /******************************************************************************/
 /*                                 d o _ M v                                  */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Mv()
 {
    int rc;
@@ -1300,7 +1390,7 @@ int XrdXrootdProtocol::do_OffloadIO()
        if (reTry) {reTry->Post(); reTry = 0;}
        TRACEP(FSZIO, "dispatch new I/O path " <<PathID <<" offs=" <<IO.Offset);
       }
-  
+
 // Perform all I/O operations on a parallel stream
 //
    if (!isNOP)
@@ -1368,22 +1458,23 @@ struct OpenHelper
                               }
       };
 }
-  
+
 int XrdXrootdProtocol::do_Open()
 {
    static XrdXrootdCallBack openCB("open file", XROOTD_MON_OPENR);
    int fhandle;
-   int rc, mode, opts, openopts, compchk = 0;
-   int popt, retStat = 0;
+   int rc, mode, opts, optt, openopts, compchk = 0;
+   int popt;
    char *opaque, usage, ebuff[2048], opC;
-   bool doDig, doforce = false, isAsync = false;
-   char *fn = argp->buff, opt[16], *op=opt;
+   bool doDig, doforce = false, isAsync = false, doClone = false;
+   char *fn = argp->buff, opt[24], *op=opt;
    XrdSfsFile *fp;
-   XrdXrootdFile *xp;
+   XrdXrootdFile *xp, *sameFS = 0;
    struct stat statbuf;
    struct ServerResponseBody_Open myResp;
    int resplen = sizeof(myResp.fhandle);
    struct iovec IOResp[3];  // Note that IOResp[0] is completed by Response
+   int retStat = 0;
 
 // Keep Statistics
 //
@@ -1393,13 +1484,18 @@ int XrdXrootdProtocol::do_Open()
 //
    mode = (int)ntohs(Request.open.mode);
    opts = (int)ntohs(Request.open.options);
+   optt = (int)ntohs(Request.open.optiont);
+
+// Make sutre that retstat and retstatx are processed correctly
+//
+   if (optt & kXR_retstatx) opts |= kXR_retstat;
 
 // Map the mode and options
 //
    mode = mapMode(mode) | S_IRUSR | S_IWUSR; usage = 'r';
-        if (opts & kXR_open_read)  
+        if (opts & kXR_open_read)
            {openopts  = SFS_O_RDONLY;  *op++ = 'r'; opC = XROOTD_MON_OPENR;}
-   else if (opts & kXR_open_updt)   
+   else if (opts & kXR_open_updt)
            {openopts  = SFS_O_RDWR;    *op++ = 'u'; usage = 'w';
                                                     opC = XROOTD_MON_OPENW;}
    else if (opts & kXR_open_wrto)
@@ -1431,7 +1527,7 @@ int XrdXrootdProtocol::do_Open()
                                        mode |= SFS_O_MKPTH;
                                       }
            }
-   if (opts & kXR_compress)        
+   if (opts & kXR_compress)
            {openopts |= SFS_O_RAWIO;   *op++ = 'c'; compchk = 1;}
    if (opts & kXR_force)              {*op++ = 'f'; doforce = true;}
    if ((opts & kXR_async || as_force) && as_aioOK)
@@ -1442,6 +1538,26 @@ int XrdXrootdProtocol::do_Open()
    if (opts & kXR_retstat)            {*op++ = 't'; retStat = 1;}
    if (opts & kXR_posc)               {*op++ = 'p'; openopts |= SFS_O_POSC;}
    if (opts & kXR_seqio)              {*op++ = 'S'; openopts |= SFS_O_SEQIO;}
+   if (optt & kXR_samefs || optt & kXR_dup)
+      {XrdXrootdFHandle fh(Request.open.fhtemplt);
+       if (!(fsFeatures & XrdSfs::hasFICL))
+              return Response.Send(kXR_Unsupported,(optt & kXR_dup) ?
+                      "file cloning is not supported" :
+                      "colocating with a specified file is not supported");
+       if (optt & kXR_dup)
+          {if (usage != 'w') return Response.Send(kXR_ArgInvalid,
+                                    "cloned file is not being opened R/W");
+                                      {*op++ = 'K'; doClone = true;}
+          }
+       if (!(opts & kXR_new)) return Response.Send(kXR_ArgInvalid,
+                 "file must be opened as a new file in order to colocate");
+       if (openopts &= SFS_O_CREAT)   {*op++ = 'L'; openopts |= SFS_O_CREATAT;}
+
+       if (!FTab || !(sameFS = FTab->Get(fh.handle)))
+          return Response.Send(kXR_FileNotOpen,
+                           "file template does not refer to an open file");
+      }
+
    *op = '\0';
 
 // Do some tracing, avoid exposing any security token in the URL
@@ -1469,8 +1585,8 @@ int XrdXrootdProtocol::do_Open()
      if (Route[RD_open1].Host[rdType])
        ropt = RPList.Validate(fn);
      else
-       if (Route[RD_write].Host[rdType] && ('w' == usage || strchr(op, 'd')))
-         ropt = RD_write;
+       if (Route[RD_openw].Host[rdType] && ('w' == usage || strchr(op, 'd')))
+         ropt = RD_openw;
      if (ropt > 0)
        return Response.Send(
          kXR_redirect, Route[ropt].Port[rdType],
@@ -1518,20 +1634,38 @@ int XrdXrootdProtocol::do_Open()
    oHelp.fp = fp;
 
 // The open is elegible for a deferred response, indicate we're ok with that
+// unless a clone is required. Then this needs to be done synchrnously.
 //
-   fp->error.setErrCB(&openCB, ReqID.getID());
-   fp->error.setUCap(clientPV);
+   if (!doClone)
+      {fp->error.setErrCB(&openCB, ReqID.getID());
+       fp->error.setUCap(clientPV);
+      }
 
 // If TPC opens require TLS but this is not a TLS connection, prohibit TPC
 //
    if ((doTLS & Req_TLSTPC) && !isTLS && !Link->hasBridge())
       openopts|= SFS_O_NOTPC;
 
+// If needed add the colocation information. This is the filesystem in
+// which the new file should be created.
+//
+   std::string oinfo(opaque ? opaque : "");
+   if ((openopts & SFS_O_CREATAT) == SFS_O_CREATAT)
+      {std::string coloc = sameFS->XrdSfsp->FName();
+       coloc = "oss.coloc=" + XrdOucUtils::UrlEncode(coloc);
+       oinfo += (!oinfo.empty() ? "&" : "") + coloc;
+      }
+
 // Open the file
 //
    if ((rc = fp->open(fn, (XrdSfsFileOpenMode)openopts,
-                     (mode_t)mode, CRED, opaque)))
-      {rc = fsError(rc, opC, fp->error, fn, opaque); return rc;}
+                     (mode_t)mode, CRED, oinfo.c_str())))
+      return fsError(rc, opC, fp->error, fn, opaque);
+
+// If file needs to be cloned, do so now
+//
+   if (doClone && (rc = fp->Clone(*(sameFS->XrdSfsp))))
+      return fsError(rc, opC, fp->error, fn, opaque);
 
 // Obtain a hyper file object
 //
@@ -1626,7 +1760,7 @@ int XrdXrootdProtocol::do_Open()
           for (int i = 1; i < maxStreams; i++)
               {if (Stream[i] && !(Stream[i]->pmDone))
                   {Stream[i]->pmDone = true;
-                   Stream[i]->pmHandle = 
+                   Stream[i]->pmHandle =
                        PMark->Begin(*(Stream[i]->Link->AddrInfo()),
                                     *pmHandle, Stream[i]->Link->ID);
                   }
@@ -1651,7 +1785,7 @@ int XrdXrootdProtocol::do_Open()
 /******************************************************************************/
 /*                               d o _ P i n g                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Ping()
 {
 
@@ -1667,7 +1801,7 @@ int XrdXrootdProtocol::do_Ping()
 /******************************************************************************/
 /*                            d o _ P r e p a r e                             */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Prepare(bool isQuery)
 {
    static XrdXrootdCallBack prpCB("query", XROOTD_MON_QUERY);
@@ -1876,7 +2010,7 @@ int XrdXrootdProtocol::do_Prepare(bool isQuery)
            }
    return rc;
 }
-  
+
 /******************************************************************************/
 /*                           d o _ P r o t o c o l                            */
 /******************************************************************************/
@@ -1886,7 +2020,7 @@ namespace XrdXrootd
 extern char *bifResp[2];
 extern int   bifRLen[2];
 }
-  
+
 int XrdXrootdProtocol::do_Protocol()
 {
    static kXR_int32 verNum = static_cast<kXR_int32>(htonl(kXR_PROTOCOLVERSION));
@@ -1981,7 +2115,7 @@ int XrdXrootdProtocol::do_Protocol()
 /******************************************************************************/
 /*                              d o _ Q c o n f                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Qconf()
 {
    static const int fsctl_cmd = SFS_FSCTL_STATCC|SFS_O_LOCAL;
@@ -2049,7 +2183,7 @@ int XrdXrootdProtocol::do_Qconf()
            {n = snprintf(bp,bleft,"%d\n",maxReadv_ior);
             bp += n; bleft -= n;
            }
-   else if (!strcmp("readv_iov_max", val)) 
+   else if (!strcmp("readv_iov_max", val))
            {n = snprintf(bp, bleft, "%d\n", XrdProto::maxRvecsz);
             bp += n; bleft -= n;
            }
@@ -2115,14 +2249,14 @@ int XrdXrootdProtocol::do_Qconf()
 
 // Make sure all ended well
 //
-   if (val) 
+   if (val)
       return Response.Send(kXR_ArgTooLong, "too many query config arguments.");
 
 // All done
 //
    return Response.Send(buff, sizeof(buff) - bleft);
 }
-  
+
 /******************************************************************************/
 /*                            d o _ Q c o n f C X                             */
 /******************************************************************************/
@@ -2181,7 +2315,13 @@ int XrdXrootdProtocol::do_Qfh()
 // Perform the appropriate query
 //
    switch(qopt)
-         {case kXR_Qopaqug: qType = "Qopaqug";
+         {case kXR_QFinfo:  qType = "QFinfo";
+                            fArg = (Request.query.dlen ? argp->buff : 0);
+                            rc = fp->XrdSfsp->fctl(SFS_FCTL_QFINFO,
+                                                   Request.query.dlen, fArg,
+                                                   CRED);
+                            break;
+          case kXR_Qopaqug: qType = "Qopaqug";
                             fArg = (Request.query.dlen ? argp->buff : 0);
                             rc = fp->XrdSfsp->fctl(SFS_FCTL_SPEC1,
                                                    Request.query.dlen, fArg,
@@ -2191,7 +2331,7 @@ int XrdXrootdProtocol::do_Qfh()
                             rc = fp->XrdSfsp->fctl(SFS_FCTL_STATV, 0,
                                                    fp->XrdSfsp->error);
                             break;
-          default:          return Response.Send(kXR_ArgMissing, 
+          default:          return Response.Send(kXR_ArgMissing,
                                    "Required query argument not present");
          }
 
@@ -2205,11 +2345,11 @@ int XrdXrootdProtocol::do_Qfh()
       return fsError(rc, XROOTD_MON_QUERY, fp->XrdSfsp->error, 0, 0);
    return Response.Send();
 }
-  
+
 /******************************************************************************/
 /*                            d o _ Q o p a q u e                             */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Qopaque(short qopt)
 {
    static XrdXrootdCallBack qpqCB("query", XROOTD_MON_QUERY);
@@ -2242,9 +2382,16 @@ int XrdXrootdProtocol::do_Qopaque(short qopt)
        myData.Arg1Len = (opaque ? opaque - argp->buff - 1    : dlen);
        myData.Arg2    = opaque;
        myData.Arg2Len = (opaque ? argp->buff + dlen - opaque : 0);
-       fsctl_cmd = SFS_FSCTL_PLUGIN;
-       Act = " qopaquf '"; AData = argp->buff;
+       if (qopt == kXR_QFSinfo)
+          {fsctl_cmd = SFS_FSCTL_PLUGFS;
+           Act = " qfsinfo '";
+          } else {
+           fsctl_cmd = SFS_FSCTL_PLUGIN;
+           Act = " qopaquf '";
+          }
+       AData = argp->buff;
       }
+
 // The query is elegible for a deferred response, indicate we're ok with that
 //
    myError.setErrCB(&qpqCB, ReqID.getID());
@@ -2260,7 +2407,7 @@ int XrdXrootdProtocol::do_Qopaque(short qopt)
 /******************************************************************************/
 /*                             d o _ Q s p a c e                              */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Qspace()
 {
    static const int fsctl_cmd = SFS_FSCTL_STATLS;
@@ -2296,7 +2443,7 @@ int XrdXrootdProtocol::do_Qspace()
 /******************************************************************************/
 /*                              d o _ Q u e r y                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Query()
 {
     short qopt = (short)ntohs(Request.query.infotype);
@@ -2311,8 +2458,11 @@ int XrdXrootdProtocol::do_Query()
           case kXR_Qconfig: return do_Qconf();
           case kXR_Qspace:  return do_Qspace();
           case kXR_Qxattr:  return do_Qxattr();
+          case kXR_QFSinfo:
           case kXR_Qopaque:
           case kXR_Qopaquf: return do_Qopaque(qopt);
+//        case kXR_Qvisa:
+          case kXR_QFinfo:
           case kXR_Qopaqug: return do_Qfh();
           case kXR_QPrep:   return do_Prepare(true);
           default:          break;
@@ -2320,14 +2470,14 @@ int XrdXrootdProtocol::do_Query()
 
 // Whatever we have, it's not valid
 //
-   return Response.Send(kXR_ArgInvalid, 
+   return Response.Send(kXR_ArgInvalid,
                         "Invalid information query type code");
 }
 
 /******************************************************************************/
 /*                             d o _ Q x a t t r                              */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Qxattr()
 {
    static XrdXrootdCallBack statCB("stat", XROOTD_MON_QUERY);
@@ -2359,11 +2509,11 @@ int XrdXrootdProtocol::do_Qxattr()
    TRACEP(FS, "rc=" <<rc <<" qxattr " <<argp->buff);
    return fsError(rc, XROOTD_MON_QUERY, myError, argp->buff, opaque);
 }
-  
+
 /******************************************************************************/
 /*                               d o _ R e a d                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Read()
 {
    int pathID, retc;
@@ -2459,7 +2609,7 @@ int XrdXrootdProtocol::do_Read()
 // IO.File   = file to be read
 // IO.Offset = Offset at which to read
 // IO.IOLen  = Number of bytes to read from file and write to socket
-  
+
 int XrdXrootdProtocol::do_ReadAll()
 {
    int rc, xframt, Quantum = (IO.IOLen > maxBuffsz ? maxBuffsz : IO.IOLen);
@@ -2519,7 +2669,7 @@ int XrdXrootdProtocol::do_ReadAll()
 /******************************************************************************/
 /*                           d o _ R e a d N o n e                            */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_ReadNone(int &retc, int &pathID)
 {
    XrdXrootdFHandle fh;
@@ -2566,7 +2716,7 @@ int XrdXrootdProtocol::do_ReadNone(int &retc, int &pathID)
 /******************************************************************************/
 /*                               d o _ R e a d V                              */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_ReadV()
 {
 // This will read multiple buffers at the same time in an attempt to avoid
@@ -2594,8 +2744,8 @@ int XrdXrootdProtocol::do_ReadV()
    if ( (rdVecNum <= 0) || (rdVecNum*hdrSZ != rdVecLen) )
       return Response.Send(kXR_ArgInvalid, "Read vector is invalid");
 
-// Make sure that we can copy the read vector to our local stack. We must impose 
-// a limit on it's size. We do this to be able to reuse the data buffer to 
+// Make sure that we can copy the read vector to our local stack. We must impose
+// a limit on it's size. We do this to be able to reuse the data buffer to
 // prevent cross-cpu memory cache synchronization.
 //
    if (rdVecNum > XrdProto::maxRvecsz)
@@ -2611,7 +2761,7 @@ int XrdXrootdProtocol::do_ReadV()
 //
    raVec = (readahead_list *)argp->buff;
    totSZ = rdVecLen; Quantum = maxReadv_ior;
-   for (i = 0; i < rdVecNum; i++) 
+   for (i = 0; i < rdVecNum; i++)
        {totSZ += (rdVec[i].size = ntohl(raVec[i].rlen));
         if (rdVec[i].size < 0)       return Response.Send(kXR_ArgInvalid,
                                            "Readv length is negative");
@@ -2645,7 +2795,7 @@ int XrdXrootdProtocol::do_ReadV()
       {if ((k = getBuff(1, Quantum)) <= 0) return k;}
       else if (hcNow < hcNext) hcNow++;
 
-// Check that we really have at least one file open. This needs to be done 
+// Check that we really have at least one file open. This needs to be done
 // only once as this code runs in the control thread.
 //
    if (!FTab) return Response.Send(kXR_FileNotOpen,
@@ -2727,7 +2877,7 @@ int XrdXrootdProtocol::do_ReadV()
 /******************************************************************************/
 /*                                 d o _ R m                                  */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Rm()
 {
    int rc;
@@ -2757,7 +2907,7 @@ int XrdXrootdProtocol::do_Rm()
 /******************************************************************************/
 /*                              d o _ R m d i r                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Rmdir()
 {
    int rc;
@@ -2787,7 +2937,7 @@ int XrdXrootdProtocol::do_Rmdir()
 /******************************************************************************/
 /*                                d o _ S e t                                 */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Set()
 {
    XrdOucTokenizer setargs(argp->buff);
@@ -2860,7 +3010,7 @@ int XrdXrootdProtocol::do_Set_Cache(XrdOucTokenizer &setargs)
    if (rc == SFS_OK) return Response.Send("");
    return fsError(rc, 0, myError, 0, 0);
 }
-  
+
 /******************************************************************************/
 /*                            d o _ S e t _ M o n                             */
 /******************************************************************************/
@@ -2917,11 +3067,11 @@ int XrdXrootdProtocol::do_Set_Mon(XrdOucTokenizer &setargs)
 //
    return Response.Send(kXR_ArgInvalid, "invalid set monitor argument");
 }
-  
+
 /******************************************************************************/
 /*                               d o _ S t a t                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Stat()
 {
    static XrdXrootdCallBack statCB("stat", XROOTD_MON_STAT);
@@ -2992,7 +3142,7 @@ int XrdXrootdProtocol::do_Stat()
 /******************************************************************************/
 /*                              d o _ S t a t x                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Statx()
 {
    static XrdXrootdCallBack statxCB("xstat", XROOTD_MON_STAT);
@@ -3030,7 +3180,7 @@ int XrdXrootdProtocol::do_Statx()
 /******************************************************************************/
 /*                               d o _ S y n c                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Sync()
 {
    static XrdXrootdCallBack syncCB("sync", 0);
@@ -3065,7 +3215,7 @@ int XrdXrootdProtocol::do_Sync()
 /******************************************************************************/
 /*                           d o _ T r u n c a t e                            */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Truncate()
 {
    static XrdXrootdCallBack truncCB("trunc", 0);
@@ -3126,11 +3276,11 @@ int XrdXrootdProtocol::do_Truncate()
 //
    return Response.Send();
 }
-  
+
 /******************************************************************************/
 /*                              d o _ W r i t e                               */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_Write()
 {
    int pathID;
@@ -3188,7 +3338,7 @@ int XrdXrootdProtocol::do_Write()
 //
    return do_WriteAll();
 }
-  
+
 /******************************************************************************/
 /*                           d o _ W r i t e A i o                            */
 /******************************************************************************/
@@ -3196,7 +3346,7 @@ int XrdXrootdProtocol::do_Write()
 // IO.File   = file to be written
 // IO.Offset = Offset at which to write
 // IO.IOLen  = Number of bytes to read from socket and write to file
-  
+
 int XrdXrootdProtocol::do_WriteAio()
 {
    XrdXrootdNormAio *aioP;
@@ -3222,7 +3372,7 @@ int XrdXrootdProtocol::do_WriteAio()
 // IO.File   = file to be written
 // IO.Offset = Offset at which to write
 // IO.IOLen  = Number of bytes to read from socket and write to file
-  
+
 int XrdXrootdProtocol::do_WriteAll()
 {
    int rc, Quantum = (IO.IOLen > maxBuffsz ? maxBuffsz : IO.IOLen);
@@ -3237,7 +3387,7 @@ int XrdXrootdProtocol::do_WriteAll()
 //
    while(IO.IOLen > 0)
         {if ((rc = getData("data", argp->buff, Quantum)))
-            {if (rc > 0) 
+            {if (rc > 0)
                 {Resume = &XrdXrootdProtocol::do_WriteCont;
                  myBlast = Quantum;
                 }
@@ -3264,7 +3414,7 @@ int XrdXrootdProtocol::do_WriteAll()
 // IO.Offset = Offset at which to write
 // IO.IOLen  = Number of bytes to read from socket and write to file
 // myBlast  = Number of bytes already read from the socket
-  
+
 int XrdXrootdProtocol::do_WriteCont()
 {
    int rc;
@@ -3282,11 +3432,11 @@ int XrdXrootdProtocol::do_WriteCont()
    if (IO.IOLen > 0) return do_WriteAll();
    return Response.Send();
 }
-  
+
 /******************************************************************************/
 /*                          d o _ W r i t e N o n e                           */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_WriteNone()
 {
    char *buff, dbuff[4096];
@@ -3310,7 +3460,7 @@ int XrdXrootdProtocol::do_WriteNone()
         {rlen = Link->Recv(buff, blen, readWait);
          if (rlen  < 0) return Link->setEtext("link read error");
          IO.IOLen -= rlen;
-         if (rlen < blen) 
+         if (rlen < blen)
             {myBlen   = 0;
              Resume   = &XrdXrootdProtocol::do_WriteNone;
              return 1;
@@ -3355,7 +3505,7 @@ int XrdXrootdProtocol::do_WriteNone(int pathID, XErrorCode ec,
 /******************************************************************************/
 /*                       d o _ W r i t e N o n e M s g                        */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_WriteNoneMsg()
 {
 // Send our the error message and return
@@ -3371,11 +3521,11 @@ int XrdXrootdProtocol::do_WriteNoneMsg()
 
    return Response.Send(kXR_FSError, IO.File->XrdSfsp->error.getErrText());
 }
-  
+
 /******************************************************************************/
 /*                          d o _ W r i t e S p a n                           */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_WriteSpan()
 {
    int rc;
@@ -3419,11 +3569,11 @@ int XrdXrootdProtocol::do_WriteSpan()
    if (IO.IOLen > 0) return do_WriteAll();
    return Response.Send();
 }
-  
+
 /******************************************************************************/
 /*                             d o _ W r i t e V                              */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::do_WriteV()
 {
 // This will write multiple buffers at the same time in an attempt to avoid
@@ -3510,7 +3660,7 @@ int XrdXrootdProtocol::do_WriteV()
 //
    if (maxSZ > maxTransz) Quantum = maxTransz;
       else Quantum = static_cast<int>(maxSZ);
-   
+
 // Now obtain the right size buffer
 //
    if ((Quantum < halfBSize && Quantum > 1024) || Quantum > argp->bsize)
@@ -3648,7 +3798,7 @@ do{if (IO.IOLen > 0)
    if (wvInfo) {free(wvInfo); wvInfo = 0;}
    return fsError((int)xfrSZ, 0, IO.File->XrdSfsp->error, 0, 0);
 }
-  
+
 /******************************************************************************/
 /*                              S e n d F i l e                               */
 /******************************************************************************/
@@ -3691,7 +3841,7 @@ int XrdXrootdProtocol::SendFile(XrdOucSFVec *sfvec, int sfvnum)
 /******************************************************************************/
 /*                                 S e t F D                                  */
 /******************************************************************************/
-  
+
 void XrdXrootdProtocol::SetFD(int fildes)
 {
    if (fildes < 0) IO.File->sfEnabled = 0;
@@ -3704,7 +3854,7 @@ void XrdXrootdProtocol::SetFD(int fildes)
 /******************************************************************************/
 /*                               f s E r r o r                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::fsError(int rc, char opC, XrdOucErrInfo &myError,
                                const char *Path, char *Cgi)
 {
@@ -3822,7 +3972,7 @@ int XrdXrootdProtocol::fsError(int rc, char opC, XrdOucErrInfo &myError,
 /******************************************************************************/
 /*                               f s O v r l d                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::fsOvrld(char opC, const char *Path, char *Cgi)
 {
    static const char *prot = "root://";
@@ -3888,7 +4038,7 @@ int XrdXrootdProtocol::fsOvrld(char opC, const char *Path, char *Cgi)
 //
    return Response.Send(kXR_Overloaded, "server is overloaded");
 }
-  
+
 /******************************************************************************/
 /*                          f s R e d i r N o E n t                           */
 /******************************************************************************/
@@ -3974,7 +4124,7 @@ namespace XrdXrootd
           time_t       expTime = 0;
           RAtomic_uint refs = {0};
 
-          netInfo(const char*id) : netID(strdup(id)) {} 
+          netInfo(const char*id) : netID(strdup(id)) {}
          ~netInfo() {if (netID) free(netID);}
          };
 }
@@ -4080,7 +4230,7 @@ int XrdXrootdProtocol::fsRedirPI(const char *trg, int port, int trglen)
        if (!T.Info) return Response.Send(kXR_redirect, port, trg, trglen);
        size_t colon = TDst.find(":");
        if (colon != std::string::npos)
-          {urlPort.assign(TDst, colon+1, std::string::npos); 
+          {urlPort.assign(TDst, colon+1, std::string::npos);
            TDst.erase(colon);
           }
        Target = RedirPI->RedirectURL(urlHead.c_str(), Target.c_str(),
@@ -4107,11 +4257,11 @@ int XrdXrootdProtocol::fsRedirPI(const char *trg, int port, int trglen)
    eDest.Emsg("Xeq_RedirPI", mbuff);
    return Response.Send(kXR_ServerError, mbuff);
 }
-  
+
 /******************************************************************************/
 /*                               g e t B u f f                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::getBuff(const int isRead, int Quantum)
 {
 
@@ -4163,11 +4313,11 @@ char *XrdXrootdProtocol::getCksType(char *opaque, char *cspec, int cslen)
 //
    return JobCKT;
 }
-  
+
 /******************************************************************************/
 /* Private:                     l o g L o g i n                               */
 /******************************************************************************/
-  
+
 bool XrdXrootdProtocol::logLogin(bool xauth)
 {
    const char *uName, *ipName, *tMsg, *zMsg = "";
@@ -4287,11 +4437,11 @@ void XrdXrootdProtocol::MonAuth()
    Monitor.Report(bP);
    if (Entity.moninfo) {free(Entity.moninfo); Entity.moninfo = 0;}
 }
-  
+
 /******************************************************************************/
 /*                               r p C h e c k                                */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::rpCheck(char *fn, char **opaque)
 {
    char *cp;
@@ -4315,11 +4465,11 @@ int XrdXrootdProtocol::rpCheck(char *fn, char **opaque)
          }
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                r p E m s g                                 */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::rpEmsg(const char *op, char *fn)
 {
    char buff[2048];
@@ -4327,7 +4477,7 @@ int XrdXrootdProtocol::rpEmsg(const char *op, char *fn)
    buff[sizeof(buff)-1] = '\0';
    return Response.Send(kXR_NotAuthorized, buff);
 }
- 
+
 /******************************************************************************/
 /*                                 S e t S F                                  */
 /******************************************************************************/
@@ -4348,11 +4498,11 @@ int XrdXrootdProtocol::SetSF(kXR_char *fhandle, bool seton)
 //
    return 0;
 }
-  
+
 /******************************************************************************/
 /*                                S q u a s h                                 */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::Squash(char *fn)
 {
    char *ofn, *ifn = fn;
@@ -4385,7 +4535,7 @@ int XrdXrootdProtocol::Squash(char *fn)
 /******************************************************************************/
 /*                                v p E m s g                                 */
 /******************************************************************************/
-  
+
 int XrdXrootdProtocol::vpEmsg(const char *op, char *fn)
 {
    char buff[2048];

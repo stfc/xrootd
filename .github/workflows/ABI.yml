@@ -40,7 +40,7 @@ jobs:
         sudo apt install -y abi-dumper abi-compliance-checker w3m
 
     - name: Clone repository
-      uses: actions/checkout@v5
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -54,7 +54,7 @@ jobs:
       run: cmake --build build/new --parallel --target install
 
     - name: Checkout Base Reference of XRootD to Compare ABI
-      run: git checkout -f ${GITHUB_BASE_REF:-$(git rev-list --tags --max-count=1)}
+      run: git checkout -f ${GITHUB_BASE_REF:-$(git rev-list --max-count=1 origin/master)}
 
     - name: Configure XRootD (Base Reference)
       run: cmake -S . -B build/old -DCMAKE_INSTALL_PREFIX=install/old
@@ -93,7 +93,7 @@ jobs:
 
     - name: Upload Artifacts on Failure
       if: ${{ failure() }}
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: abi-report
         path: abi-report
