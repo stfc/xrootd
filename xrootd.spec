@@ -676,7 +676,7 @@ fi
 
 
 %if %{with ceph}
-%files ceph
+%files ceph-buffered
 %{_libdir}/libXrdCeph-6.so
 %{_libdir}/libXrdCephXattr-6.so
 %{_libdir}/libXrdCephPosix.so.*

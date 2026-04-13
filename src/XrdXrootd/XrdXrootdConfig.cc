@@ -1692,7 +1692,7 @@ int XrdXrootdProtocol::xred(XrdOucStream &Config)
         {"rmdir",    RD_rmdir},
         {"stat",     RD_stat},
         {"trunc",    RD_trunc},
-        {"write",    RD_write}
+        {"write",    RD_openw}
        };
     static const int rHLen = 264;
     char rHost[2][rHLen], *hP[2], *val;

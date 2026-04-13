@@ -55,26 +55,25 @@
 #include "XrdCeph/XrdCephBulkAioRead.hh"
 #include "XrdSfs/XrdSfsFlags.hh" // for the OFFLINE flag status 
 #include "XrdCks/XrdCksData.hh"
-
+#include "XrdCks/XrdCksCalcadler32.hh"
 #include <XrdCks/XrdCksAssist.hh>
 
+char *ts_rfc3339() {
 
-std::string ts_rfc3339() {
     std::time_t now = std::time({});
-    std::string timeString(32, '\0'); 
-    std::strftime(timeString.data(), timeString.size(), "%F %TZ", std::gmtime(&now));
-    //timeString.resize(std::strlen(timeString.c_str())); // Trim nulls
-    return timeString;
+    char timeString[std::size("yyyy-mm-dd hh:mm:ss")];
+    std::strftime(std::data(timeString), std::size(timeString),
+                  "%F %TZ", std::gmtime(&now));
+    return strdup(timeString);
 }
 
-//no need to check if nibble is <0 due to type limits
-constexpr char hex2ascii(char nibble)   { return (nibble<=9) ? nibble+'0' : nibble-10+'a'; }
+constexpr char hex2ascii(char nibble)   { return (0<= nibble && nibble<=9) ? nibble+'0' : nibble-10+'a'; }
 constexpr char hiNibble(uint8_t hexbyte) { return (hexbyte & 0xf0) >> 4; }
 constexpr char loNibble(uint8_t hexbyte) { return (hexbyte & 0x0f); }
 
-std::string hexbytes2ascii(const char bytes[], const unsigned int length){
+constexpr char *hexbytes2ascii(const char bytes[], const unsigned int length){
 
-  std::string asciiVal(9,'\0');
+  char asciiVal[9] {};
   for (unsigned int i = 0, j = 0; i < length; i++) {
 
      const uint8_t hexbyte = bytes[i];
@@ -82,16 +81,16 @@ std::string hexbytes2ascii(const char bytes[], const unsigned int length){
      asciiVal[j++] = hex2ascii(loNibble(hexbyte));
 
   }
-  return asciiVal;
+  return strdup(asciiVal);
 }
 
 using namespace std;
 
-int setXrdCksAttr(const int fd, const char* cstype, std::string ckSumbuf) {
+int setXrdCksAttr(const int fd, const char* cstype, const char* ckSumbuf) {
 
       int rc = -1;
 
-      std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf.c_str(), time(0));
+      std::vector<char> attrData = XrdCksAttrData(cstype, ckSumbuf, time(0));
 
       rc = ceph_posix_fsetxattr(fd, XrdCksAttrName(cstype).c_str(),
       attrData.data(), attrData.size(), 0);
@@ -157,10 +156,11 @@ XrdSysMutex g_logAdler32;
 std::map<unsigned int, unsigned long long> g_idxCntr;
 
 //IJJ: Actions for Adler32 checksum
-
-
+extern bool g_calcStreamedAdler32;
 bool g_calcStreamedAdler32 = false;
+extern bool g_logStreamedAdler32;
 bool g_logStreamedAdler32 = false;
+extern bool g_storeStreamedAdler32; 
 bool g_storeStreamedAdler32 = false;
 
 FILE *g_cksLogFile;
@@ -820,14 +820,14 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
 }
 
 
-std::string formatAdler32(unsigned long adler32) {
+const char* formatAdler32(unsigned long adler32) {
 
 #ifndef Xrd_Big_Endian
   adler32 = htonl(adler32);
 #endif
-  std::string adler32Cks(9,'\0');
-  sprintf(adler32Cks.data(), "%08lx", adler32);
-  return adler32Cks;
+  char adler32Cks[8+1];
+  sprintf(adler32Cks, "%08lx", adler32);
+  return (const char*)strdup(adler32Cks);
 }
 
 int ceph_posix_close(int fd) {
@@ -856,32 +856,27 @@ int ceph_posix_close(int fd) {
 
     if (fr->writingData && g_calcStreamedAdler32) {
 
-      if (fr->cksCalcadler32) {
-        unsigned long adlerULong;
-        memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
-        std::string adler32Cks = formatAdler32(adlerULong);
+	    unsigned long adlerULong;
+	    memcpy((&adlerULong), fr->cksCalcadler32->Final(), 4);
+	    const char* adler32Cks = formatAdler32(adlerULong);
 
-        logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks.c_str());
+  	  logwrapper((char*)"ceph_close: fd: %d, Adler32 streamed checksum = %s", fd, adler32Cks);
 
         if (g_logStreamedAdler32) {
-          std::string path = fr->pool + ":" + fr->name;
-          std::string ts = ts_rfc3339();
-          fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts.c_str(), path.c_str(), "streamed", "adler32", adler32Cks.c_str());
+	  const char *path = strdup((fr->pool + ":" + fr->name).c_str());
+	  XrdSysMutexHelper lock(g_logAdler32);
+          fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339(), path, "streamed", "adler32", adler32Cks);
           fflush(g_cksLogFile);
         }
 
-        if (g_storeStreamedAdler32) {
-          int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
-          if (rc != 0) {
-            logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
-          }
-        }
-        delete fr->cksCalcadler32;
-        fr->cksCalcadler32 = nullptr;
-      } else {
-        // No checksum object present; log this unexpected condition
-        logwrapper((char*)"ceph_close: fd %d expected streamed checksum object but found none", fd);
+
+      if (g_storeStreamedAdler32) {
+        int rc = setXrdCksAttr(fd, "adler32", adler32Cks); 
+        if (rc != 0) {
+          logwrapper((char*)"ceph_close: Can't set attribute XrdCks.adler32 for checksum");
+         }
       }
+      delete fr->cksCalcadler32;
     }
 
     deleteFileRef(fd, *fr);
@@ -958,8 +953,8 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
   CephFileRef* fr = getFileRef(fd);
   if (fr) {
     // TODO implement proper logging level for this plugin - this should be only debug
-    //logwrapper((char*)"ceph_posix_pwrite: for fd %d, count=%d", fd, count);
 
+    //logwrapper((char*)"ceph_write: for fd %d, count=%d", fd, count);
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
@@ -975,7 +970,7 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
     fr->bytesWritten+=count;
-    if (g_calcStreamedAdler32 && (fr->maxOffsetWritten == offset + count - 1)) {
+    if (g_calcStreamedAdler32 && ( fr->maxOffsetWritten == offset + count -1 ) ) {
       fr->cksCalcadler32->Update((const char*)buf, count);
     }
     if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
@@ -1023,7 +1018,8 @@ ssize_t ceph_aio_write(int fd, XrdSfsAio *aiop, AioCB *cb) {
     const char *buf = (const char*)aiop->sfsAio.aio_buf;
     size_t offset = aiop->sfsAio.aio_offset;
     // TODO implement proper logging level for this plugin - this should be only debug
-    logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
+
+    //logwrapper((char*)"ceph_aio_write: for fd %d, count=%d", fd, count);
     if ((fr->flags & O_ACCMODE) == O_RDONLY) {
       return -EBADF;
     }
@@ -1478,9 +1474,9 @@ ssize_t ceph_posix_setxattr(XrdOucEnv* env, const char* path,
 //
 // We know that streamed checksums use ceph_posix_fsetxattr below, so this must be a readback checksum
 //
-      std::string cksAscii = hexbytes2ascii(cks->Value, cks->Length);
-      logwrapper((char*)"readback checksum = %s", cksAscii.c_str());
-      fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339().c_str(), path, "readback", "adler32", cksAscii.c_str());
+      auto cksAscii = (const char*)hexbytes2ascii(cks->Value, cks->Length);
+      logwrapper((char*)"readback checksum = %s", cksAscii);
+      fprintf(g_cksLogFile, "%s,%s,%s,%s,%s\n", ts_rfc3339(), path, "readback", "adler32", cksAscii);
       fflush(g_cksLogFile);
 
   }

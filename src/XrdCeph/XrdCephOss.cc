@@ -168,9 +168,9 @@ XrdCephOss::~XrdCephOss() {
 extern unsigned int g_maxCephPoolIdx;
 extern unsigned int g_cephAioWaitThresh;
 
-extern bool g_calcStreamedAdler32;
-extern bool g_storeStreamedAdler32;
-extern bool g_logStreamedAdler32;
+bool g_calcStreamedAdler32;
+bool g_storeStreamedAdler32;
+bool g_logStreamedAdler32;
 
 
 
@@ -374,52 +374,6 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
          }
        }
        if (!strcmp(var, "ceph.streamed-cks-adler32")) { // Streaming Adler32 checksum
-
-         var = Config.GetWord();
-         if (var) {
-/*
- * Currently, actions are simply additive:
- *
- * Store implies calculate, log, store
- * Log   implies calculate, log
- * Calc  implies calculate
- *
- * Might want to make e.g. logging optional in the future,
- * when storing is more prevalent.
- *
- * Instead of setting g_* flags in three conditionals,
- * can switch to setting values in a single bitfield flag
- *
- */
-           if (strstr(var, "calc")) {
-	       g_calcStreamedAdler32 = true;
-               g_logStreamedAdler32 = false;
-	       g_storeStreamedAdler32 = false;
-           }
-           if (strstr(var, "log")) {
-	       g_calcStreamedAdler32 = true;
-               g_logStreamedAdler32 = true;
-	       g_storeStreamedAdler32 = false;
-           }
-           if (strstr(var, "store")) {
-	       g_calcStreamedAdler32 = true;
-               g_logStreamedAdler32 = true;
-	       g_storeStreamedAdler32 = true;
-           }
-
-         }
-  
-       if (!strcmp(var, "ceph.streamed-cks-logfile") ) {
-         var = Config.GetWord();
-	     if (var) { 
-           g_cksLogFileName = strdup(var);
-         } else {
-           Eroute.Emsg("Config", "Missing value for ceph.streamed-cks-logfile in config file");
- 	         return 1;
-         }
-       }// "ceph.streamed-cks-logfile"
-     }// "ceph.streamed-cks-adler32"
-     } // while
 
          var = Config.GetWord();
          if (var) {
