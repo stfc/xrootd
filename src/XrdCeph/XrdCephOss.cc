@@ -28,14 +28,8 @@
 #include <fcntl.h>
 #include <limits.h>
 
-#include "XrdVersion.hh"
-#include "XrdCeph/XrdCephOss.hh"
-#include "XrdCeph/XrdCephOssDir.hh"
-#include "XrdCeph/XrdCephOssFile.hh"
+#include <chrono>
 #include "XrdCeph/XrdCephPosix.hh"
-#include "XrdCeph/XrdCephOssBufferedFile.hh"
-#include "XrdCeph/XrdCephOssReadVFile.hh"
-
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPlatform.hh"
@@ -43,6 +37,12 @@
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucName2Name.hh"
 #include "XrdOuc/XrdOucN2NLoader.hh"
+#include "XrdVersion.hh"
+#include "XrdCeph/XrdCephOss.hh"
+#include "XrdCeph/XrdCephOssDir.hh"
+#include "XrdCeph/XrdCephOssFile.hh"
+#include "XrdCeph/XrdCephOssBufferedFile.hh"
+#include "XrdCeph/XrdCephOssReadVFile.hh"
 
 XrdVERSIONINFO(XrdOssGetStorageSystem, XrdCephOss);
 
@@ -115,7 +115,7 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
   if (attrLen <= 0) {
     retval = -EINVAL;
   } else {
-    attrValue[attrLen] = '\0';
+    attrValue[attrLen] = (char)'\0';
     char *endPointer = (char *)NULL;
     retval = strtoll(attrValue, &endPointer, 10);
   }
@@ -421,8 +421,56 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
      }// "ceph.streamed-cks-adler32"
      } // while
 
-     // Now check if any errors occurred during file i/o
+         var = Config.GetWord();
+         if (var) {
+/*
+ * Currently, actions are simply additive:
+ *
+ * Store implies calculate, log, store
+ * Log   implies calculate, log
+ * Calc  implies calculate
+ *
+ * Might want to make e.g. logging optional in the future,
+ * when storing is more prevalent.
+ *
+ * Instead of setting g_* flags in three conditionals,
+ * can switch to setting values in a single bitfield flag
+ *
+ */
+           if (strstr(var, "calc")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = false;
+	       g_storeStreamedAdler32 = false;
+           }
+           if (strstr(var, "log")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = true;
+	       g_storeStreamedAdler32 = false;
+           }
+           if (strstr(var, "store")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = true;
+	       g_storeStreamedAdler32 = true;
+           }
 
+         }
+       }// "ceph.streamed-cks-adler32"
+
+       if (!strcmp(var, "ceph.streamed-cks-logfile") ) {
+         var = Config.GetWord();
+	 if (var) { 
+           g_cksLogFileName = strdup(var);
+         } else {
+           const char *defLogFileName = "/tmp/checksums.log"; // To-DO: Move defLogFileName so it can also be used as fallback 
+	                                                      //  when attempt to open specified log file below fails
+           Eroute.Emsg("Config", "Missing value for ceph.streamed-cks-logfile in config file, setting to default = ", defLogFileName);
+	   g_cksLogFileName = strdup(defLogFileName);
+ 	   return 1;
+         }
+       }// "ceph.streamed-cks-logfile"
+
+     }
+     // Now check if any errors occured during file i/o
      int retc = Config.LastError();
      if (retc) {
        NoGo = Eroute.Emsg("Config", -retc, "read config file",

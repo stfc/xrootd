@@ -648,7 +648,6 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
   return ret_keepalive;
 };
 
-
 void XrdHttpReq::appendOpaque(XrdOucString &s, XrdSecEntity *secent, char *hash, time_t tnow) {
 
   int l = 0;

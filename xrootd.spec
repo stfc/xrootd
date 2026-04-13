@@ -9,7 +9,7 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	1%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}
+Release:	96%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}%{?with_openssl11:.ssl11}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
@@ -263,12 +263,12 @@ allows the XRootD server admin to delegate authorization decisions for
 a subset of the namespace to an external issuer.
 
 %if %{with ceph}
-%package ceph
+%package ceph-buffered
 Summary:	XRootD plugin for interfacing with the Ceph storage platform
 Group:		System Environment/Libraries
 Requires:	%{name}-libs%{?_isa} = %{epoch}:%{version}-%{release}
 
-%description ceph
+%description ceph-buffered
 The xrootd-ceph is an OSS layer plugin for the XRootD server for
 interfacing with the Ceph storage platform.
 %endif

@@ -28,7 +28,7 @@
 
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <cerrno>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <stdlib.h>
@@ -150,6 +150,8 @@ unsigned int g_nextCephFd = 0;
 XrdSysMutex g_fd_mutex;
 /// mutex protecting initialization of ceph clusters
 XrdSysMutex g_init_mutex;
+/// mutex protecting checksum log file
+XrdSysMutex g_logAdler32;
 
 //JW Counter for number of times a given cluster is resolved.
 std::map<unsigned int, unsigned long long> g_idxCntr;
@@ -641,8 +643,9 @@ int checkAndCreateStriper(unsigned int cephPoolIdx, std::string &userAtPool, con
       return 0;
     }
     IOCtxDict & ioDict = g_ioCtx[cephPoolIdx];
-    ioDict.emplace(userAtPool, ioctx);
-    sDict.emplace(userAtPool, striper);
+    ioDict.insert(std::pair<std::string, librados::IoCtx*>(userAtPool, ioctx));
+    sDict.insert(std::pair<std::string, libradosstriper::RadosStriper*>
+                 (userAtPool, striper)).first;
   }
   return 1;
 } 
@@ -717,7 +720,7 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
 
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
-
+  fr.writingData = false;
   struct stat buf;
   libradosstriper::RadosStriper *striper = getRadosStriper(fr); //Get a handle to the RADOS striper API
   if (NULL == striper) {
@@ -994,7 +997,7 @@ static void ceph_aio_write_complete(rados_completion_t c, void *arg) {
     fr->bytesAsyncWritePending -= awa->nbBytes;
     fr->bytesWritten += awa->nbBytes;
     if (awa->aiop->sfsAio.aio_nbytes)
-      fr->maxOffsetWritten = std::max(fr->maxOffsetWritten, uint64_t(awa->aiop->sfsAio.aio_offset + awa->aiop->sfsAio.aio_nbytes - 1));
+      fr->maxOffsetWritten = std::max(fr->maxOffsetWritten, awa->aiop->sfsAio.aio_offset + awa->aiop->sfsAio.aio_nbytes - 1);
     ::timeval now;
     ::gettimeofday(&now, nullptr);
     double writeTime = 0.000001 * (now.tv_usec - awa->startTime.tv_usec) + 1.0 * (now.tv_sec - awa->startTime.tv_sec);
