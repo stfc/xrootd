@@ -13,11 +13,14 @@ else()
   endif()
 endif()
 
+include_directories( ${RADOS_INCLUDE_DIR} )
+
 set(BUILD_CEPH TRUE CACHE BOOL INTERNAL FORCE)
 
 add_library(XrdCephPosix SHARED
   XrdCephPosix.cc XrdCephPosix.hh
   XrdCephBulkAioRead.cc XrdCephBulkAioRead.hh)
+
 
 target_compile_options(XrdCephPosix
   PRIVATE -Wno-deprecated-declarations)
@@ -53,7 +56,7 @@ add_library(${LIB_XRD_CEPH} MODULE
 )
 
 target_link_libraries(${LIB_XRD_CEPH}
-  PRIVATE XrdCephPosix XrdUtils XrdServer ${RADOS_LIBS})
+  PRIVATE ${XROOTD_LIBRARIES} XrdCephPosix XrdUtils XrdServer ${RADOS_LIBS})
 
 set(LIB_XRD_CEPH_XATTR XrdCephXattr-${PLUGIN_VERSION})
 

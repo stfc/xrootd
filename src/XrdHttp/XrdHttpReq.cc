@@ -632,6 +632,12 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
   } else
     appendOpaque(redirdest, 0, 0, 0);
 
+  if (prot->m_redir) {
+    TRACE(REQ, " XrdHttpReq::Redir Will rewrite URL");
+    auto newRedirUrl = prot->m_redir->Redirect(redirdest.c_str());
+    if (!newRedirUrl.empty()) {
+      redirdest = newRedirUrl.c_str();
+    }
   if (!prot->strp_cgi_params.empty()) {
     stripCgi(redirdest, prot->strp_cgi_params); /* appendOpaque() may have added credentials */
   }
@@ -647,7 +653,6 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
   reset();
   return ret_keepalive;
 };
-
 
 void XrdHttpReq::appendOpaque(XrdOucString &s, XrdSecEntity *secent, char *hash, time_t tnow) {
 

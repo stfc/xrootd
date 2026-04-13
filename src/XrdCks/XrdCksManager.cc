@@ -463,7 +463,8 @@ int XrdCksManager::Del(const char *Pfn, XrdCksData &Cks)
 int XrdCksManager::Get(const char *Pfn, XrdCksData &Cks)
 {
    XrdOucXAttr<XrdCksXAttr> xCS;
-   time_t MTime;
+   // not checking stale checksums as ceph file modification times constantly refresh on read
+   //time_t MTime;
    int rc, nFault;
 
 // Determine which checksum to get (we will accept unsupported ones as well)
@@ -481,16 +482,14 @@ int XrdCksManager::Get(const char *Pfn, XrdCksData &Cks)
    nFault = strcmp(xCS.Attr.Cks.Name, Cks.Name);
    Cks = xCS.Attr.Cks;
 
-// Verify the file. We do this with modification time unless that check
-// has been turned off.
-//
-   if (CksOpts & Cks_nomtchk) MTime = Cks.fmTime;
-      else if ((rc = ModTime(Pfn, MTime))) return rc;
+// Verify the file
+// not done as ceph mod times are weird
+//   if ((rc = ModTime(Pfn, MTime))) return rc;
+
 
 // Return result
 //
-   return (Cks.fmTime != MTime || nFault
-       ||  Cks.Length > XrdCksData::ValuSize || Cks.Length <= 0
+   return ( nFault || Cks.Length > XrdCksData::ValuSize || Cks.Length <= 0
         ? -ESTALE : int(Cks.Length));
 }
 
