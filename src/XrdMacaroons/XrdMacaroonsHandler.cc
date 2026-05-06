@@ -53,6 +53,36 @@ char *unquote(const char *str) {
 
 }
 
+
+std::string Macaroons::NormalizeSlashes(const std::string &input)
+{
+    std::string output;
+      // In most cases, the output should be "about as large"
+      // as the input
+    output.reserve(input.size());
+    char prior_chr = '\0';
+    size_t output_idx = 0;
+    for (size_t idx = 0; idx < input.size(); idx++) {
+        char chr = input[idx];
+        if (prior_chr == '/' && chr == '/') {
+            output_idx++;
+            continue;
+        }
+        output += input[output_idx];
+        prior_chr = chr;
+        output_idx++;
+    }
+    return output;
+}
+
+static bool is_reserved_caveat(const std::string &cv)
+{
+  return cv.compare(0, 5, "name:")     == 0 ||
+         cv.compare(0, 5, "path:")     == 0 ||
+         cv.compare(0, 9, "activity:") == 0 ||
+         cv.compare(0, 7, "before:")   == 0;
+}
+
 static
 ssize_t determine_validity(const std::string& input)
 {
@@ -456,21 +486,26 @@ int Handler::ProcessReq(XrdHttpExtReq &req)
     json_object *caveats_obj;
     std::vector<std::string> other_caveats;
     if (json_object_object_get_ex(macaroon_req, "caveats", &caveats_obj))
-    {                                                   
+    {
         if (json_object_is_type(caveats_obj, json_type_array))
         { // Caveats were provided.  Let's record them.
           // TODO - could just add these in-situ.  No need for the other_caveats vector.
             int array_length = json_object_array_length(caveats_obj);
             other_caveats.reserve(array_length);
             for (int idx=0; idx<array_length; idx++)
-            {                           
+            {
                 json_object *caveat_item = json_object_array_get_idx(caveats_obj, idx);
                 if (caveat_item)
                 {
                     const char *caveat_item_str = json_object_get_string(caveat_item);
+                    if (caveat_item_str && is_reserved_caveat(caveat_item_str)) {
+                        json_object_put(macaroon_req);
+                        return req.SendSimpleResp(400, NULL, NULL,
+                            "Caveat uses a reserved predicate key (name:/path:/activity:/before:)", 0);
+                    }
                     other_caveats.emplace_back(caveat_item_str);
-                }                            
-            }                                
+                }
+            }
         }
     }
     json_object_put(macaroon_req);
