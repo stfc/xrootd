@@ -28,14 +28,8 @@
 #include <fcntl.h>
 #include <limits.h>
 
-#include "XrdVersion.hh"
-#include "XrdCeph/XrdCephOss.hh"
-#include "XrdCeph/XrdCephOssDir.hh"
-#include "XrdCeph/XrdCephOssFile.hh"
+#include <chrono>
 #include "XrdCeph/XrdCephPosix.hh"
-#include "XrdCeph/XrdCephOssBufferedFile.hh"
-#include "XrdCeph/XrdCephOssReadVFile.hh"
-
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdSys/XrdSysError.hh"
 #include "XrdSys/XrdSysPlatform.hh"
@@ -43,6 +37,12 @@
 #include "XrdOuc/XrdOucStream.hh"
 #include "XrdOuc/XrdOucName2Name.hh"
 #include "XrdOuc/XrdOucN2NLoader.hh"
+#include "XrdVersion.hh"
+#include "XrdCeph/XrdCephOss.hh"
+#include "XrdCeph/XrdCephOssDir.hh"
+#include "XrdCeph/XrdCephOssFile.hh"
+#include "XrdCeph/XrdCephOssBufferedFile.hh"
+#include "XrdCeph/XrdCephOssReadVFile.hh"
 
 XrdVERSIONINFO(XrdOssGetStorageSystem, XrdCephOss);
 
@@ -115,7 +115,7 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
   if (attrLen <= 0) {
     retval = -EINVAL;
   } else {
-    attrValue[attrLen] = '\0';
+    attrValue[attrLen] = (char)'\0';
     char *endPointer = (char *)NULL;
     retval = strtoll(attrValue, &endPointer, 10);
   }
@@ -127,6 +127,9 @@ ssize_t getNumericAttr(const char* const path, const char* attrName, const int m
   return retval;
 
 }
+char *g_cksLogFileName;
+
+extern FILE *g_cksLogFile;
 
 extern "C"
 {
@@ -164,6 +167,12 @@ XrdCephOss::~XrdCephOss() {
 // declared and used in XrdCephPosix.cc
 extern unsigned int g_maxCephPoolIdx;
 extern unsigned int g_cephAioWaitThresh;
+
+extern bool g_calcStreamedAdler32;
+extern bool g_storeStreamedAdler32;
+extern bool g_logStreamedAdler32;
+extern double g_ECcorrectionFactor; // correction factor to apply to used space when EC pools are used, to get a better estimate of actual used space
+
 
 int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
    int NoGo = 0;
@@ -348,7 +357,7 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            if (!Config.GetRest(parms, sizeof(parms)) || parms[0]) {
              Eroute.Emsg("Config", "readvalgname parameters will be ignored");
            }
-          m_configBufferIOmode = var; // allowed values would be aio, io
+          m_configBufferIOmode = var; // allowed values would be aio, io, write-only-io
          } else {
            Eroute.Emsg("Config", "Missing value for ceph.bufferiomode in config file", configfn);
            return 1;
@@ -361,19 +370,97 @@ int XrdCephOss::Configure(const char *configfn, XrdSysError &Eroute) {
            m_configPoolnames = var;
          } else {
            Eroute.Emsg("Config", "Missing value for ceph.reportingpools in config file", configfn);
-           return 1; 
+           return 1;
          }
-       }       
-     } // while
+         // EC correction factor for pool reporting
+         if (!strncmp(var, "ceph.ECcorrectionFactor", 23)) { // size in bytes
+           var = Config.GetWord();
+           if (var) {
+             double value = strtod(var, 0);
+             if (value > 0 and value <= 1) {
+               g_ECcorrectionFactor = value;
+               Eroute.Emsg("Config", "ceph.ECcorrectionFactor", std::to_string(g_ECcorrectionFactor).c_str() ); 
+             } else {
+               Eroute.Emsg("Config", "Invalid value for ceph.ECcorrectionFactor in config file; enter a value between 0 and 1", configfn, var);
+               return 1;
+             }
+         } else {
+           Eroute.Emsg("Config", "Missing value for ceph.ECcorrectionFactor in config file. Setting default 8/11", configfn);
+	   g_ECcorrectionFactor = 0.727272; // default 8/11 EC correction factor
+           return 1;
+           }
+         }
+       }
 
-     // Now check if any errors occurred during file i/o
+       if (!strcmp(var, "ceph.streamed-cks-adler32")) { // Streaming Adler32 checksum
 
+         var = Config.GetWord();
+         if (var) {
+/*
+ * Currently, actions are simply additive:
+ *
+ * Store implies calculate, log, store
+ * Log   implies calculate, log
+ * Calc  implies calculate
+ *
+ * Might want to make e.g. logging optional in the future,
+ * when storing is more prevalent.
+ *
+ * Instead of setting g_* flags in three conditionals,
+ * can switch to setting values in a single bitfield flag
+ *
+ */
+           if (strstr(var, "calc")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = false;
+	       g_storeStreamedAdler32 = false;
+           }
+           if (strstr(var, "log")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = true;
+	       g_storeStreamedAdler32 = false;
+           }
+           if (strstr(var, "store")) {
+	       g_calcStreamedAdler32 = true;
+               g_logStreamedAdler32 = true;
+	       g_storeStreamedAdler32 = true;
+           }
+
+         }
+       }// "ceph.streamed-cks-adler32"
+
+       if (!strcmp(var, "ceph.streamed-cks-logfile") ) {
+         var = Config.GetWord();
+	 if (var) { 
+           g_cksLogFileName = strdup(var);
+         } else {
+           const char *defLogFileName = "/tmp/checksums.log"; // To-DO: Move defLogFileName so it can also be used as fallback 
+	                                                      //  when attempt to open specified log file below fails
+           Eroute.Emsg("Config", "Missing value for ceph.streamed-cks-logfile in config file, setting to default = ", defLogFileName);
+	   g_cksLogFileName = strdup(defLogFileName);
+ 	   return 1;
+         }
+       }// "ceph.streamed-cks-logfile"
+
+     }
+     // Now check if any errors occured during file i/o
      int retc = Config.LastError();
      if (retc) {
        NoGo = Eroute.Emsg("Config", -retc, "read config file",
                           configfn);
      }
      Config.Close();
+
+     if (g_logStreamedAdler32) {
+       if (NULL == (g_cksLogFile = fopen(g_cksLogFileName, "a"))) {
+         g_logStreamedAdler32 = false;
+         Eroute.Emsg("Config: ", "cannot open file for logging checksum values and pathname", g_cksLogFileName);
+	 return 1;
+       } else {
+	 Eroute.Emsg("Config: ", "Opened file for logging checksum values and pathname: ", g_cksLogFileName);
+       }
+     }
+
    }
    return NoGo;
 }
@@ -606,20 +693,16 @@ int XrdCephOss::StatLS(XrdOucEnv &env, const char *charPath, char *buff, int &bl
       XrdCephEroute.Say("Failed to get used space in pool ", spath.c_str());
       return -EINVAL;
   }
-
   // Construct the object path
   std::string spaceInfoPath =  spath + ":" +  (const char *)"__spaceinfo__";
   totalSpace = getNumericAttr(spaceInfoPath.c_str(), "total_space", 24);
   if (totalSpace < 0) {
     XrdCephEroute.Say("Could not get 'total_space' attribute from ", spaceInfoPath.c_str());
     return -EINVAL;
-  }
-
+  }  
 //
 // Figure for 'usedSpace' already accounts for Erasure Coding overhead
 //
-
-
   freeSpace = totalSpace - usedSpace;
   blen = formatStatLSResponse(buff, blen, 
     spath.c_str(),       /* "oss.cgroup" */ 
@@ -678,4 +761,5 @@ XrdOssDF* XrdCephOss::newFile(const char *tident) {
 
   return xrdCephOssDF;
 }
+
 
