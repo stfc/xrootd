@@ -13,11 +13,13 @@ else()
   find_package(Macaroons)
 endif()
 
-include(FindPkgConfig REQUIRED)
-if(FORCE_ENABLED)
-  pkg_check_modules(JSON REQUIRED json-c)
-else()
-  pkg_check_modules(JSON json-c)
+if(NOT APPLE)
+  include(FindPkgConfig REQUIRED)
+  if(FORCE_ENABLED)
+    pkg_check_modules(JSON REQUIRED json-c)
+  else()
+    pkg_check_modules(JSON json-c)
+  endif()
 endif()
 
 if(MACAROONS_FOUND AND JSON_FOUND AND BUILD_HTTP)
@@ -31,8 +33,6 @@ set(XrdMacaroons XrdMacaroons-${PLUGIN_VERSION})
 add_library(${XrdMacaroons} MODULE
   XrdMacaroons.cc
   XrdMacaroonsAuthz.cc       XrdMacaroonsAuthz.hh
-  XrdMacaroonsGenerate.cc    XrdMacaroonsGenerate.hh
-  XrdMacaroonsUtils.cc       XrdMacaroonsUtils.hh
   XrdMacaroonsConfigure.cc
   XrdMacaroonsHandler.cc     XrdMacaroonsHandler.hh
 )

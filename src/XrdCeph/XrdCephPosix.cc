@@ -967,8 +967,9 @@ ssize_t ceph_posix_pwrite(int fd, const void *buf, size_t count, off64_t offset)
     if (rc) return rc;
     XrdSysMutexHelper lock(fr->statsMutex);
     fr->wrcount++;
-    fr->bytesWritten+=count;
-    if (g_calcStreamedAdler32 && ( fr->maxOffsetWritten == offset + count -1 ) ) {
+    fr->bytesWritten+=count; 
+    if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
+    if (g_calcStreamedAdler32) {
       fr->cksCalcadler32->Update((const char*)buf, count);
     }
     if (offset + count) fr->maxOffsetWritten = std::max(offset + count - 1, fr->maxOffsetWritten);
