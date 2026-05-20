@@ -1,21 +1,18 @@
-
-#include <stdexcept>
-#include <sstream>
-
-#include <ctime>
-
-#include "macaroons.h"
+#include "XrdMacaroonsAuthz.hh"
+#include "XrdMacaroonsHandler.hh"
 
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucPrivateUtils.hh"
 #include "XrdSec/XrdSecEntity.hh"
 #include "XrdSec/XrdSecEntityAttr.hh"
 
-#include "XrdMacaroonsHandler.hh"
-#include "XrdMacaroonsAuthz.hh"
+#include <ctime>
+#include <sstream>
+#include <stdexcept>
+
+#include <macaroons.h>
 
 using namespace Macaroons;
-
 
 namespace {
 
@@ -58,7 +55,6 @@ private:
     Access_Operation m_oper;
     time_t m_now;
 };
-
 
 static XrdAccPrivs AddPriv(Access_Operation op, XrdAccPrivs privs)
 {
@@ -108,7 +104,6 @@ static XrdAccPrivs AddPriv(Access_Operation op, XrdAccPrivs privs)
     return static_cast<XrdAccPrivs>(new_privs);
 }
 
-
 // Accept any value of the path, name, or activity caveats
 int validate_verify_empty(void *emsg_ptr,
                           const unsigned char *pred,
@@ -126,8 +121,7 @@ int validate_verify_empty(void *emsg_ptr,
     return 1;
 }
 
-}
-
+} // unnamed namespace
 
 Authz::Authz(XrdSysLogger *log, char const *config, XrdAccAuthorize *chain)
     : m_max_duration(86400),
@@ -143,7 +137,6 @@ Authz::Authz(XrdSysLogger *log, char const *config, XrdAccAuthorize *chain)
     }
     m_authz_behavior = static_cast<int>(behavior);
 }
-
 
 XrdAccPrivs
 Authz::OnMissing(const XrdSecEntity *Entity, const char *path,
@@ -240,7 +233,7 @@ Authz::Access(const XrdSecEntity *Entity, const char *path,
     if (macaroon_verify(verifier, macaroon,
                          reinterpret_cast<const unsigned char *>(m_secret.c_str()),
                          m_secret.size(),
-                         NULL, 0, // discharge macaroons
+                         nullptr, 0, // discharge macaroons
                          &mac_err))
     {
         m_log.Log(LogMask::Debug, "Access", "Macaroon verification failed");
@@ -340,13 +333,12 @@ bool Authz::Validate(const char   *token,
     return true;
 }
 
-
 AuthzCheck::AuthzCheck(const char *req_path, const Access_Operation req_oper, ssize_t max_duration, XrdSysError &log)
       : m_max_duration(max_duration),
         m_log(log),
         m_path(NormalizeSlashes(req_path)),
         m_oper(req_oper),
-        m_now(time(NULL))
+        m_now(time(nullptr))
 {
     switch (m_oper)
     {
@@ -382,7 +374,6 @@ AuthzCheck::AuthzCheck(const char *req_path, const Access_Operation req_oper, ss
     };
 }
 
-
 int
 AuthzCheck::verify_before_s(void *authz_ptr,
                             const unsigned char *pred,
@@ -390,7 +381,6 @@ AuthzCheck::verify_before_s(void *authz_ptr,
 {
     return static_cast<AuthzCheck*>(authz_ptr)->verify_before(pred, pred_sz);
 }
-
 
 int
 AuthzCheck::verify_activity_s(void *authz_ptr,
@@ -400,7 +390,6 @@ AuthzCheck::verify_activity_s(void *authz_ptr,
     return static_cast<AuthzCheck*>(authz_ptr)->verify_activity(pred, pred_sz);
 }
 
-
 int
 AuthzCheck::verify_path_s(void *authz_ptr,
                           const unsigned char *pred,
@@ -409,7 +398,6 @@ AuthzCheck::verify_path_s(void *authz_ptr,
     return static_cast<AuthzCheck*>(authz_ptr)->verify_path(pred, pred_sz);
 }
 
-
 int
 AuthzCheck::verify_name_s(void *authz_ptr,
                           const unsigned char *pred,
@@ -417,7 +405,6 @@ AuthzCheck::verify_name_s(void *authz_ptr,
 {
     return static_cast<AuthzCheck*>(authz_ptr)->verify_name(pred, pred_sz);
 }
-
 
 int
 AuthzCheck::verify_before(const unsigned char * pred, size_t pred_sz)
@@ -465,7 +452,6 @@ AuthzCheck::verify_before(const unsigned char * pred, size_t pred_sz)
     return result;
 }
 
-
 int
 AuthzCheck::verify_activity(const unsigned char * pred, size_t pred_sz)
 {
@@ -488,7 +474,6 @@ AuthzCheck::verify_activity(const unsigned char * pred, size_t pred_sz)
     m_log.Log(LogMask::Info, "AuthzCheck", "macaroon does NOT have desired activity", m_desired_activity.c_str());
     return 1;
 }
-
 
 int
 AuthzCheck::verify_path(const unsigned char * pred, size_t pred_sz)
@@ -533,7 +518,6 @@ AuthzCheck::verify_path(const unsigned char * pred, size_t pred_sz)
 
     return !is_subdir;
 }
-
 
 int
 AuthzCheck::verify_name(const unsigned char * pred, size_t pred_sz)

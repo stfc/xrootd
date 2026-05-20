@@ -2366,7 +2366,7 @@ int XrdXrootdProtocol::do_Qxattr()
   
 int XrdXrootdProtocol::do_Read()
 {
-   int pathID, retc;
+   int pathID, retc = 0;
    XrdXrootdFHandle fh(Request.read.fhandle);
    numReads++;
 

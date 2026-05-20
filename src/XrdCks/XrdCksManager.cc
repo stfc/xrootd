@@ -118,10 +118,10 @@ XrdCksManager::~XrdCksManager()
   
 int XrdCksManager::Calc(const char *Pfn, XrdCksData &Cks, int doSet)
 {
-   XrdCksCalc *csP;
+   XrdCksCalc *csP = nullptr;
    csInfo *csIP = &csTab[0];
-   time_t MTime;
-   int rc;
+   time_t MTime = 0;
+   int rc = 0;
 
 // Determine which checksum to get
 //
@@ -463,9 +463,11 @@ int XrdCksManager::Del(const char *Pfn, XrdCksData &Cks)
 int XrdCksManager::Get(const char *Pfn, XrdCksData &Cks)
 {
    XrdOucXAttr<XrdCksXAttr> xCS;
+
    // not checking stale checksums as ceph file modification times constantly refresh on read
    //time_t MTime;
-   int rc, nFault;
+   int rc=0, nFault=0;
+
 
 // Determine which checksum to get (we will accept unsupported ones as well)
 //
@@ -612,7 +614,7 @@ int XrdCksManager::Set(const char *Pfn, XrdCksData &Cks, int myTime)
 // Set correct times if need be
 //
    if (!myTime)
-      {time_t MTime;
+      {time_t MTime = 0;
        int rc = ModTime(Pfn, MTime);
        if (rc) return rc;
        xCS.Attr.Cks.fmTime = static_cast<long long>(MTime);
@@ -637,7 +639,7 @@ void XrdCksManager::SetOpts(int opt) {CksOpts = opt;}
 int XrdCksManager::Ver(const char *Pfn, XrdCksData &Cks)
 {
    XrdOucXAttr<XrdCksXAttr> xCS;
-   time_t MTime;
+   time_t MTime = 0;
    csInfo *csIP = &csTab[0];
    int rc;
 
