@@ -1,11 +1,13 @@
 #undef NDEBUG
 
+#include "XrdOuc/XrdOucString.hh"
 #include "XrdOuc/XrdOucUtils.hh"
 #include "XrdOuc/XrdOucTUtils.hh"
 #include "XrdOuc/XrdOucPrivateUtils.hh"
 
 #include <map>
 #include <string>
+#include <unordered_set>
 
 #include <gtest/gtest.h>
 
@@ -117,6 +119,8 @@ static const std::string authz_strings[] = {
   "61631//first/namespace/token_gen/test1171569942?&authz=REDACTED&pelican.timeout=9.5s"
 };
 
+static const std::unordered_set<std::string> strip_authz_cgi_keys = {"authz"};
+
 static const std::string authz_headers[] = {
   "authorization:REDACTED",
   "authorization :REDACTED",
@@ -216,6 +220,66 @@ TEST(XrdOucUtilsTests, RedactToken_AuthzCGI_ValidToken)
   }
 }
 
+TEST(XrdOucUtilsTests, StripToken_AuthzCGI)
+{
+  size_t pos = 0;
+  for (std::string authz : authz_strings) {
+    for (std::string prefix : token_prefixes) {
+      for (std::string token : tokens) {
+        std::string str = authz;
+
+        pos = 0;
+        /* Replace all "REDACTED" strings with a token value in the test string */
+        while ((pos = str.find(redacted, pos)) != std::string::npos)
+          str = str.replace(pos, redacted.size(), prefix + token);
+
+        /* Check also with XrdOucString */
+        XrdOucString ostr = str.c_str();
+
+        /* Erase all "authz=REDACTED" from input strings */
+        while ((pos = authz.find("authz=REDACTED")) != std::string::npos)
+          authz.erase(pos, 14 /* strlen("authz=REDACTED") */);
+
+        /* Remove ?& in case authz was the first element */
+        if ((pos = authz.find("?&")) != std::string::npos)
+          authz.erase(pos + 1, 1);
+
+        /* If authz was the only query parameter, avoid leaving a dangling '?' */
+        if (!authz.empty() && authz.back() == '?')
+          authz.pop_back();
+
+        stripCgi(str, strip_authz_cgi_keys);
+
+        /* Assert that we do not find "authz=" in the output */
+        ASSERT_TRUE(str.find("authz=") == std::string::npos)
+          << "str = '" << str << "'" << std::endl;
+
+        /* Assert that we do not find the token value in the output */
+        ASSERT_TRUE(str.find(token) == std::string::npos)
+          << "\ntoken = '" << token << "'\n str = '" << str << "'" << std::endl;
+
+        /* Assert that we get the expected string after stripping */
+        ASSERT_EQ(str, authz)
+          << "\nref = '" << authz << "'\nstr = '" << str << "'" << std::endl;
+
+        stripCgi(ostr, strip_authz_cgi_keys);
+
+        /* Assert that we do not find "authz=" in the output */
+        ASSERT_TRUE(ostr.find("authz=") == STR_NPOS)
+          << "str = '" << ostr << "'" << std::endl;
+
+        /* Assert that we do not find the token value in the output */
+        ASSERT_TRUE(ostr.find(token.c_str()) == STR_NPOS)
+          << "str = '" << ostr << "'" << std::endl;
+
+        /* Assert that we get the expected string after stripping */
+        ASSERT_STREQ(ostr.c_str(), authz.c_str())
+          << "\nref = '" << authz << "'\nstr = '" << ostr << "'" << std::endl;
+      }
+    }
+  }
+}
+
 TEST(XrdOucUtilsTests, RedactToken_AuthHeader)
 {
   size_t pos = 0;
@@ -308,5 +372,24 @@ TEST(XrdOucUtilsTests, hex2bin)
         ASSERT_EQ(t.output[i], output[i]) << t.input;
       }
     }
+  }
+}
+
+static const std::map<uint64_t,std::string> size_to_human = {
+  {0,"0"},
+  {1,"1"},
+  {1023,"1023"},
+  {1024,"1.0K"},
+  {1073741845,"1.1G"},
+  {1573741845,"1.5G"},
+  {10ULL*1024ULL,"10K"},
+  {11ULL * 1024ULL * 1024ULL + 1ULL,"12M"},
+  {1088576,"1.1M"}
+};
+
+
+TEST(XrdOucUtilsTests, genHumanSizeTest) {
+  for (const auto & sizeToHuman: size_to_human) {
+    ASSERT_EQ(sizeToHuman.second,XrdOucUtils::genHumanSize(sizeToHuman.first,1024));
   }
 }

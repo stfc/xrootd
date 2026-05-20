@@ -35,6 +35,7 @@
 #include <string>
 #include <unordered_set>
 #include <vector>
+#include <cstdint>
 
 class XrdSysError;
 class XrdOucString;
@@ -63,6 +64,15 @@ static int   doIf(XrdSysError *eDest, XrdOucStream &Config,
 static bool  findPgm(const char *pgm, XrdOucString& path);
  
 static int   fmtBytes(long long val, char *buff, int bsz);
+
+/**
+ * Generates Human-readable size string (1.1K, 1.0M, ...)
+ * @param size the size of the file
+ * @param base either 1024 or 1000
+ * @return the human-readable size string of the size passed in parameter
+ * depending on the base
+ */
+static std::string genHumanSize(size_t size, uint64_t base);
 
 static char *genPath(const char *path, const char *inst, const char *psfx=0);
 
@@ -140,6 +150,12 @@ static int getModificationTime(const char * path, time_t & modificationTime);
 static void trim(std::string & str);
 
 static void trim(std::string_view & sv);
+
+static uint8_t touint8_t(const std::string_view sv);
+
+static std::string UrlEncode(const std::string &input);
+
+static std::string UrlDecode(const std::string &input);
 
     XrdOucUtils() {}
     ~XrdOucUtils() {}

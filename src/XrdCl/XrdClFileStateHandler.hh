@@ -55,6 +55,7 @@ namespace XrdCl
 {
   class Message;
   class EcHandler;
+  class FileStateHandler;
 
   //----------------------------------------------------------------------------
   //! PgRead flags
@@ -72,6 +73,21 @@ namespace XrdCl
       };
   };
   XRDOUC_ENUM_OPERATORS( PgReadFlags::Flags )
+
+  //----------------------------------------------------------------------------
+  //! Object passed between one file and a second with enough information to
+  //! allow cloning on the first into the second
+  //----------------------------------------------------------------------------
+  class FileStateHandlerTemplate : public ExportedFileTemplate
+  {
+   public:
+      FileStateHandlerTemplate(std::shared_ptr<FileStateHandler> fhp) :
+          pTemplateFileWp(fhp) { }
+
+      ~FileStateHandlerTemplate() { }
+
+      std::weak_ptr<FileStateHandler> pTemplateFileWp;
+  };
 
   //----------------------------------------------------------------------------
   //! Handle the stateful operations
@@ -128,10 +144,33 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus Open( std::shared_ptr<FileStateHandler> &self,
                                 const std::string                 &url,
-                                uint16_t                           flags,
+                                OpenFlags::Flags                   flags,
                                 uint16_t                           mode,
                                 ResponseHandler                   *handler,
-                                uint16_t                           timeout  = 0 );
+                                time_t                             timeout  = 0 );
+
+      //------------------------------------------------------------------------
+      //! Open the file pointed to by the given URL
+      //! Alows one to specify template file. Required if using Dup or Samefs
+      //! flags.
+      //!
+      //! @param url     url of the file to be opened
+      //! @param templ   Template of file to colocate with or duplicate
+      //! @param flags   OpenFlags::Flags
+      //! @param mode    Access::Mode for new files, 0 otherwise
+      //! @param handler handler to be notified about the status of the operation
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      static XRootDStatus OpenUsingTemplate(
+                              std::shared_ptr<FileStateHandler> &self,
+                              ExportedFileTemplate              *templ,
+                              const std::string                 &url,
+                              OpenFlags::Flags                   flags,
+                              uint16_t                           mode,
+                              ResponseHandler                   *handler,
+                              time_t                             timeout  = 0 );
 
       //------------------------------------------------------------------------
       //! Close the file object
@@ -143,7 +182,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus Close( std::shared_ptr<FileStateHandler> &self,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Obtain status information for this file - async
@@ -159,8 +198,23 @@ namespace XrdCl
       static XRootDStatus Stat( std::shared_ptr<FileStateHandler> &self,
                                 bool                               force,
                                 ResponseHandler                   *handler,
-                                uint16_t                           timeout = 0 );
+                                time_t                             timeout = 0 );
 
+      //------------------------------------------------------------------------
+      //! Preread data tracts at given offsets - async
+      //!
+      //! @param tracts  A vector of offset/lengths of data tracts to preread.
+      //! @param handler handler to be notified when the response arrives.
+      //!                Since no data is transmitted, there is no response
+      //!                parameter.
+      //! @param timeout timeout value, if 0 the environment default will be
+      //!                used
+      //! @return        status of the operation
+      //------------------------------------------------------------------------
+      static XRootDStatus PreRead( std::shared_ptr<FileStateHandler> &self,
+                                   const TractList                   &tracts,
+                                   ResponseHandler                   *handler,
+                                   time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Read a data chunk at a given offset - sync
@@ -183,7 +237,7 @@ namespace XrdCl
                                 uint32_t                           size,
                                 void                              *buffer,
                                 ResponseHandler                   *handler,
-                                uint16_t                           timeout = 0 );
+                                time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Read data pages at a given offset
@@ -204,7 +258,7 @@ namespace XrdCl
                                   uint32_t                           size,
                                   void                              *buffer,
                                   ResponseHandler                   *handler,
-                                  uint16_t                           timeout = 0 );
+                                  time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Retry reading one page of data at a given offset
@@ -224,7 +278,7 @@ namespace XrdCl
                                        size_t                             pgnb,
                                        void                              *buffer,
                                        PgReadHandler                     *handler,
-                                       uint16_t                           timeout = 0 );
+                                       time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Read data pages at a given offset (actual implementation)
@@ -247,7 +301,7 @@ namespace XrdCl
                                       void                              *buffer,
                                       uint16_t                           flags,
                                       ResponseHandler                   *handler,
-                                      uint16_t                           timeout = 0 );
+                                      time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write a data chunk at a given offset - async
@@ -265,7 +319,7 @@ namespace XrdCl
                                  uint32_t                           size,
                                  const void                        *buffer,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write a data chunk at a given offset - async
@@ -282,7 +336,7 @@ namespace XrdCl
                                  uint64_t                           offset,
                                  Buffer                           &&buffer,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write a data from a given file descriptor at a given offset - async
@@ -304,7 +358,7 @@ namespace XrdCl
                                  Optional<uint64_t>                 fdoff,
                                  int                                fd,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write number of pages at a given offset - async
@@ -324,7 +378,7 @@ namespace XrdCl
                                    const void                        *buffer,
                                    std::vector<uint32_t>             &cksums,
                                    ResponseHandler                   *handler,
-                                   uint16_t                           timeout = 0 );
+                                   time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write number of pages at a given offset - async
@@ -343,7 +397,7 @@ namespace XrdCl
                                         const void                        *buffer,
                                         uint32_t                           digest,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout = 0 );
+                                        time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write number of pages at a given offset - async
@@ -365,7 +419,7 @@ namespace XrdCl
                                        std::vector<uint32_t>             &cksums,
                                        kXR_char                           flags,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout = 0 );
+                                       time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Commit all pending disk writes - async
@@ -377,7 +431,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus Sync( std::shared_ptr<FileStateHandler> &self,
                                 ResponseHandler                   *handler,
-                                uint16_t                           timeout = 0 );
+                                time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Truncate the file to a particular size - async
@@ -391,7 +445,7 @@ namespace XrdCl
       static XRootDStatus Truncate( std::shared_ptr<FileStateHandler> &self,
                                     uint64_t                           size,
                                     ResponseHandler                   *handler,
-                                    uint16_t                           timeout = 0 );
+                                    time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Read scattered data chunks in one operation - async
@@ -407,7 +461,7 @@ namespace XrdCl
                                       const ChunkList                   &chunks,
                                       void                              *buffer,
                                       ResponseHandler                   *handler,
-                                      uint16_t                           timeout = 0 );
+                                      time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write scattered data chunks in one operation - async
@@ -421,7 +475,7 @@ namespace XrdCl
       static XRootDStatus VectorWrite( std::shared_ptr<FileStateHandler> &self,
                                        const ChunkList                   &chunks,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout = 0 );
+                                       time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Write scattered buffers in one operation - async
@@ -439,7 +493,7 @@ namespace XrdCl
                                   const struct iovec                *iov,
                                   int                                iovcnt,
                                   ResponseHandler                   *handler,
-                                  uint16_t                           timeout = 0 );
+                                  time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Read data into scattered buffers in one operation - async
@@ -457,12 +511,13 @@ namespace XrdCl
                                  struct iovec                      *iov,
                                  int                                iovcnt,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Performs a custom operation on an open file, server implementation
       //! dependent - async
       //!
+      //! @param queryCode query code
       //! @param arg       query argument
       //! @param handler   handler to be notified when the response arrives,
       //!                  the response parameter will hold a Buffer object
@@ -472,9 +527,10 @@ namespace XrdCl
       //! @return          status of the operation
       //------------------------------------------------------------------------
       static XRootDStatus Fcntl( std::shared_ptr<FileStateHandler> &self,
+                                 QueryCode::Code                    queryCode,
                                  const Buffer                      &arg,
                                  ResponseHandler                   *handler,
-                                 uint16_t                           timeout = 0 );
+                                 time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Get access token to a file - async
@@ -488,7 +544,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus Visa( std::shared_ptr<FileStateHandler> &self,
                                 ResponseHandler                   *handler,
-                                uint16_t                           timeout = 0 );
+                                time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Set extended attributes - async
@@ -505,7 +561,7 @@ namespace XrdCl
       static XRootDStatus SetXAttr( std::shared_ptr<FileStateHandler> &self,
                                     const std::vector<xattr_t>        &attrs,
                                     ResponseHandler                   *handler,
-                                    uint16_t                           timeout = 0 );
+                                    time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Get extended attributes - async
@@ -522,7 +578,7 @@ namespace XrdCl
       static XRootDStatus GetXAttr( std::shared_ptr<FileStateHandler> &self,
                                     const std::vector<std::string>    &attrs,
                                     ResponseHandler                   *handler,
-                                    uint16_t                           timeout = 0 );
+                                    time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Delete extended attributes - async
@@ -539,7 +595,7 @@ namespace XrdCl
       static XRootDStatus DelXAttr( std::shared_ptr<FileStateHandler> &self,
                                     const std::vector<std::string>    &attrs,
                                     ResponseHandler                   *handler,
-                                    uint16_t                           timeout = 0 );
+                                    time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! List extended attributes - async
@@ -554,7 +610,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus ListXAttr( std::shared_ptr<FileStateHandler> &self,
                                      ResponseHandler                  *handler,
-                                     uint16_t                          timeout = 0 );
+                                     time_t                            timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Create a checkpoint
@@ -570,7 +626,7 @@ namespace XrdCl
       static XRootDStatus Checkpoint( std::shared_ptr<FileStateHandler> &self,
                                       kXR_char                           code,
                                       ResponseHandler                   *handler,
-                                      uint16_t                           timeout = 0 );
+                                      time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Checkpointed write - async
@@ -588,7 +644,7 @@ namespace XrdCl
                                     uint32_t                           size,
                                     const void                        *buffer,
                                     ResponseHandler                   *handler,
-                                    uint16_t                           timeout = 0 );
+                                    time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Checkpointed WriteV - async
@@ -606,7 +662,21 @@ namespace XrdCl
                                      const struct iovec                *iov,
                                      int                                iovcnt,
                                      ResponseHandler                   *handler,
-                                     uint16_t                           timeout = 0 );
+                                     time_t                             timeout = 0 );
+
+      //------------------------------------------------------------------------
+      //! Clone ranges of files into the current file
+      //!
+      //! @param handler : handler to be notified when the response arrives.
+      //! @param timeout : timeout value, if 0 the environment default will
+      //!                  be used
+      //!
+      //! @return        : status of the operation
+      //------------------------------------------------------------------------
+      static XRootDStatus Clone(std::shared_ptr<FileStateHandler>      &self,
+                                const CloneLocations                   &locs,
+                                ResponseHandler                        *handler,
+                                time_t                                  timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Process the results of the opening operation
@@ -709,7 +779,27 @@ namespace XrdCl
       //! Try other data server
       //------------------------------------------------------------------------
       static XRootDStatus TryOtherServer( std::shared_ptr<FileStateHandler> &self,
-                                          uint16_t                           timeout );
+                                          time_t                             timeout );
+
+      //------------------------------------------------------------------------
+      //! Provides an object that carries the infromation required by another
+      //! FileStateHandler to clone the file.
+      //------------------------------------------------------------------------
+      static std::unique_ptr<ExportedFileTemplate> ExportTemplate(
+                                 std::shared_ptr<FileStateHandler> &self )
+      {
+        return std::make_unique<FileStateHandlerTemplate>(self);
+      }
+
+      //------------------------------------------------------------------------
+      //! Checks if we need to set a file template
+      //------------------------------------------------------------------------
+      bool NeedFileTempl() const
+      {
+        if( (pOpenFlags & OpenFlags::Dup) || (pOpenFlags & OpenFlags::Samefs) )
+          return true;
+        return false;
+      }
 
     private:
       //------------------------------------------------------------------------
@@ -741,7 +831,7 @@ namespace XrdCl
                                         kXR_char                           options,
                                         const std::vector<T>              &attrs,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout = 0 );
+                                        time_t                             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Send a message to a host or put it in the recovery queue
@@ -777,7 +867,7 @@ namespace XrdCl
       // Send a close and ignore the response
       //------------------------------------------------------------------------
       static XRootDStatus SendClose( std::shared_ptr<FileStateHandler> &self,
-                                     uint16_t                           timeout );
+                                     time_t                             timeout );
 
       //------------------------------------------------------------------------
       //! Check if the file is open for read only
@@ -789,7 +879,7 @@ namespace XrdCl
       //------------------------------------------------------------------------
       static XRootDStatus ReOpenFileAtServer( std::shared_ptr<FileStateHandler> &self,
                                               const URL                         &url,
-                                              uint16_t                           timeout );
+                                              time_t                             timeout );
 
       //------------------------------------------------------------------------
       //! Fail a message
@@ -800,6 +890,24 @@ namespace XrdCl
       //! Fail queued messages
       //------------------------------------------------------------------------
       void FailQueuedMessages( XRootDStatus status );
+
+      //------------------------------------------------------------------------
+      //! Helper to fill in filehandle template related options during open
+      //------------------------------------------------------------------------
+      static XRootDStatus FillFhTempl( std::shared_ptr<FileStateHandler> &self,
+                                       const URL                         &url,
+                                       Message                           *msg,
+                                       URL                               &sendUrl );
+
+      //------------------------------------------------------------------------
+      //! Private method implementing most of open
+      //------------------------------------------------------------------------
+      static XRootDStatus OpenImpl( std::shared_ptr<FileStateHandler> &self,
+                                const std::string                 &url,
+                                OpenFlags::Flags                   flags,
+                                uint16_t                           mode,
+                                ResponseHandler                   *handler,
+                                time_t                             timeout  = 0 );
 
       //------------------------------------------------------------------------
       //! Re-send queued messages
@@ -852,7 +960,7 @@ namespace XrdCl
                                              uint32_t                               length,
                                              std::unique_ptr<XrdSys::KernelBuffer>  kbuff,
                                              ResponseHandler                       *handler,
-                                             uint16_t                               timeout );
+                                             time_t                                 timeout );
 
       mutable XrdSysMutex     pMutex;
       FileStatus              pFileState;
@@ -865,7 +973,7 @@ namespace XrdCl
       URL                    *pWrtRecoveryRedir;
       uint8_t                *pFileHandle;
       uint16_t                pOpenMode;
-      uint16_t                pOpenFlags;
+      OpenFlags::Flags        pOpenFlags;
       RequestList             pToBeRecovered;
       std::set<Message*>      pInTheFly;
       uint64_t                pSessionId;
@@ -900,6 +1008,11 @@ namespace XrdCl
       // Responsible for Writing/Reading erasure-coded files
       //------------------------------------------------------------------------
       FilePlugIn           *&pPlugin;
+
+      //------------------------------------------------------------------------
+      // Used to select use of file template, with optional duplication on open
+      //------------------------------------------------------------------------
+      std::weak_ptr<FileStateHandler> pTemplateFileWp;
   };
 }
 

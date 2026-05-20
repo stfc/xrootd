@@ -53,6 +53,7 @@ set( XROOTD_PUBLIC_HEADERS
   XrdOuc/XrdOucPinPath.hh
   XrdOuc/XrdOucPinObject.hh
   XrdOuc/XrdOucRash.hh
+  XrdOuc/XrdOucRange.hh
   XrdOuc/XrdOucRash.icc
   XrdOuc/XrdOucSFVec.hh
   XrdOuc/XrdOucStream.hh
@@ -91,6 +92,7 @@ set( XROOTD_PUBLIC_HEADERS
   XrdSys/XrdSysTimer.hh
   XrdSys/XrdSysXAttr.hh
   XrdSys/XrdSysXSLock.hh
+  XrdSys/XrdSysStatx.hh
   XrdXml/XrdXmlReader.hh
   XrdXrootd/XrdXrootdRedirPI.hh
   XrdXrootd/XrdXrootdMonData.hh
@@ -121,6 +123,7 @@ if( NOT XRDCL_ONLY )
     XrdOss/XrdOssDefaultSS.hh
     XrdOss/XrdOssStatInfo.hh
     XrdOss/XrdOssWrapper.hh
+    XrdOuc/XrdOucCloneSeg.hh
     XrdSfs/XrdSfsAio.hh
     XrdSfs/XrdSfsDio.hh
     XrdSfs/XrdSfsXio.hh

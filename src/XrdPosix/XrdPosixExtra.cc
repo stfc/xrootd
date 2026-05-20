@@ -32,17 +32,106 @@
 
 #include <cerrno>
 
+#include "XrdCl/XrdClFileSystem.hh"
+
+#include "XrdOuc/XrdOucCache.hh"
+#include "XrdOuc/XrdOucECMsg.hh"
 #include "XrdOuc/XrdOucPgrwUtils.hh"
+
+#include "XrdPosix/XrdPosixAdmin.hh"
 #include "XrdPosix/XrdPosixCallBack.hh"
 #include "XrdPosix/XrdPosixExtra.hh"
 #include "XrdPosix/XrdPosixFile.hh"
 
+/******************************************************************************/
+/*                               G l o b a l s                                */
+/******************************************************************************/
 
+namespace XrdPosixGlobals
+{
+extern XrdOucCache *theCache;
+extern thread_local XrdOucECMsg ecMsg;
+}
+
+using namespace XrdPosixGlobals;
+
+/******************************************************************************/
+/*                                  F c t l                                   */
+/******************************************************************************/
+
+int XrdPosixExtra::Fctl(int fildes, XrdOucCacheOp::Code opc,
+                        const std::string& args, std::string& resp)
+{
+   XrdPosixFile *fp;
+
+// Make s
+
+// Execute the request (this handles simple cases)
+//
+   switch(opc)
+         {case XrdOucCacheOp::Code::QFinfo:
+               if (!(fp = XrdPosixObject::File(fildes)))
+                  {resp = "Invalid file descriptor.";
+                   return -1;
+                  }
+               break;
+          default:
+               resp = "File operation not supported.";
+               errno = ENOTSUP;
+               return -1;
+         }
+
+// Execute the operation which may first hit the cache if we have one.
+//
+   return fp->XCio->Fcntl(XrdOucCacheOp::Code::QFinfo, args, resp);
+}
+
+/******************************************************************************/
+/*                                 F S c t l                                  */
+/******************************************************************************/
+
+int XrdPosixExtra::FSctl(XrdOucCacheOp::Code opc,
+                        const std::string& args, std::string& resp,
+                        bool viaCache, bool viaRedir)
+{
+   XrdCl::QueryCode::Code clOp;
+
+// Make sure we support the operation
+//
+   switch(opc)
+         {case XrdOucCacheOp::Code::QFSinfo:
+               clOp = XrdCl::QueryCode::Code::FSInfo;
+               break;
+          default:
+               resp = "Filesystem operation not supported.";
+               errno = ENOTSUP;
+               return -1;
+         }
+
+// Use cache, if possible and allowed, to handle this operation
+//
+   if (viaCache && XrdPosixGlobals::theCache)
+      return XrdPosixGlobals::theCache->Fcntl(opc, args, resp);
+
+// We need to execute this at the endpoint described by args (i.e. a URL)
+//
+   XrdPosixAdmin admin(args.c_str(),XrdPosixGlobals::ecMsg);
+
+// Stat the file first to allow vectoring of the request to the right server
+// but do so only if caller wishes to use a redirect as opposed to sending
+// the request to the actual redirector.
+//
+   if (viaRedir && !admin.Stat()) return -1;
+
+// Return the actual retult
+
+   return admin.Query(clOp, resp);
+}
 
 /******************************************************************************/
 /*                                p g R e a d                                 */
 /******************************************************************************/
-  
+
 ssize_t XrdPosixExtra::pgRead (int   fildes, void*    buffer,
                                off_t offset, size_t   rdlen,
                                std::vector<uint32_t>& csvec,
@@ -66,7 +155,6 @@ ssize_t XrdPosixExtra::pgRead (int   fildes, void*    buffer,
 //
    if (rdlen > (size_t)0x7fffffff)
       {fp->UnLock();
-       
        errno = EOVERFLOW;
        if (!cbp) return -1;
        cbp->Complete(-1);
@@ -107,7 +195,7 @@ ssize_t XrdPosixExtra::pgRead (int   fildes, void*    buffer,
 /******************************************************************************/
 /*                               p g W r i t e                                */
 /******************************************************************************/
-  
+
 ssize_t XrdPosixExtra::pgWrite(int   fildes, void*    buffer,
                                off_t offset, size_t   wrlen,
                                std::vector<uint32_t>& csvec,
@@ -175,5 +263,35 @@ ssize_t XrdPosixExtra::pgWrite(int   fildes, void*    buffer,
 // Issue the write
 //
    fp->XCio->pgWrite(*cbp, (char *)buffer, offs, (int)iosz, csvec);
+   return 0;
+}
+
+/******************************************************************************/
+/*                               P r e R e a d                                */
+/******************************************************************************/
+
+int XrdPosixExtra::PreRead(int fildes, off_t offs, int size)
+{
+   XrdPosixFile *fp;
+
+// Find the file object
+//
+   if (!(fp = XrdPosixObject::File(fildes))) return -1;
+
+// We need to implement this
+//
+   return 0;
+}
+
+int XrdPosixExtra::PreRead(int fildes, XrdOucRangeList& rlist)
+{
+   XrdPosixFile *fp;
+
+// Find the file object
+//
+   if (!(fp = XrdPosixObject::File(fildes))) return -1;
+
+// We need to implement this so for now we just pretend this worked
+//
    return 0;
 }

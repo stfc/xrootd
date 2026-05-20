@@ -145,7 +145,7 @@ namespace XrdCl
       //! Check if peer supports tpc
       //------------------------------------------------------------------------
       static XRootDStatus CheckTPC( const std::string &server,
-                                    uint16_t           timeout = 0 );
+                                    time_t             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Check if peer supports tpc / tpc lite
@@ -154,7 +154,7 @@ namespace XrdCl
       //!           supported, stError otherwise
       //------------------------------------------------------------------------
       static XRootDStatus CheckTPCLite( const std::string &server,
-                                        uint16_t           timeout = 0 );
+                                        time_t             timeout = 0 );
 
       //------------------------------------------------------------------------
       //! Convert the fully qualified host name to country code
@@ -259,6 +259,18 @@ namespace XrdCl
         auto st = GetProtocolVersion( url, protver );
         if( !st.IsOK() ) return false;
         return protver >= kXR_PROTXATTVERSION;
+      }
+
+      //------------------------------------------------------------------------
+      //! Check if given server supports kXR_clone and kXR_samefs
+      //------------------------------------------------------------------------
+      inline static bool HasKSameFS( const XrdCl::URL &url )
+      {
+        if( url.IsLocalFile() ) return true;
+        int protver = 0;
+        auto st = GetProtocolVersion( url, protver );
+        if( !st.IsOK() ) return false;
+        return protver >= kXR_PROTCLONEVERSION;
       }
 
       //------------------------------------------------------------------------

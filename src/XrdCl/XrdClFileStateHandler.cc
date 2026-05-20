@@ -438,7 +438,15 @@ namespace
           {
             std::string ecurl = status->GetErrorMessage();
             EcHandler *ecHandler = GetEcHandler( hostList->front().url, ecurl );
-            if( ecHandler )
+            if( ecHandler && pStateHandler->NeedFileTempl() )
+            {
+              delete status;
+              status = new XRootDStatus( stError, errNotSupported, 0,
+                                         "File template not supported with Ec" );
+              delete ecHandler;
+              ecHandler = 0;
+            }
+            else if( ecHandler )
             {
               pStateHandler->pPlugin = ecHandler; // set the plugin for the File object
               ecHandler->Open( pStateHandler->pOpenFlags, pUserHandler, 0/*TODO figure out right value for the timeout*/ );
@@ -656,7 +664,7 @@ namespace XrdCl
     pWrtRecoveryRedir( 0 ),
     pFileHandle( 0 ),
     pOpenMode( 0 ),
-    pOpenFlags( 0 ),
+    pOpenFlags( OpenFlags::None ),
     pSessionId( 0 ),
     pDoRecoverRead( true ),
     pDoRecoverWrite( true ),
@@ -689,7 +697,7 @@ namespace XrdCl
     pWrtRecoveryRedir( 0 ),
     pFileHandle( 0 ),
     pOpenMode( 0 ),
-    pOpenFlags( 0 ),
+    pOpenFlags( OpenFlags::None ),
     pSessionId( 0 ),
     pDoRecoverRead( true ),
     pDoRecoverWrite( true ),
@@ -750,14 +758,52 @@ namespace XrdCl
   }
 
   //----------------------------------------------------------------------------
+  // Open with file template
+  //----------------------------------------------------------------------------
+  XRootDStatus FileStateHandler::OpenUsingTemplate(
+                                       std::shared_ptr<FileStateHandler> &self,
+                                       ExportedFileTemplate              *templ,
+                                       const std::string                 &url,
+                                       OpenFlags::Flags                   flags,
+                                       uint16_t                           mode,
+                                       ResponseHandler                   *handler,
+                                       time_t                             timeout )
+  {
+    if( !templ )
+      return XRootDStatus( stError, errInvalidArgs, 0, "Template file not available" );
+
+    FileStateHandlerTemplate *fht = dynamic_cast<FileStateHandlerTemplate*>( templ );
+    if( !fht )
+      return XRootDStatus( stError, errInvalidArgs, 0, "Template file invalid" );
+
+    self->pTemplateFileWp = fht->pTemplateFileWp;
+
+    return OpenImpl( self, url, flags, mode, handler, timeout );
+  }
+
+  //----------------------------------------------------------------------------
   // Open the file pointed to by the given URL
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Open( std::shared_ptr<FileStateHandler> &self,
                                        const std::string                 &url,
-                                       uint16_t                           flags,
+                                       OpenFlags::Flags                   flags,
                                        uint16_t                           mode,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout )
+                                       time_t                             timeout )
+  {
+    self->pTemplateFileWp.reset();
+    return OpenImpl( self, url, flags, mode, handler, timeout );
+  }
+
+  //----------------------------------------------------------------------------
+  // Most of Open implementation, used by Open and OpenUsingTemplate
+  //----------------------------------------------------------------------------
+  XRootDStatus FileStateHandler::OpenImpl( std::shared_ptr<FileStateHandler> &self,
+                                       const std::string                 &url,
+                                       OpenFlags::Flags                   flags,
+                                       uint16_t                           mode,
+                                       ResponseHandler                   *handler,
+                                       time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -855,8 +901,17 @@ namespace XrdCl
 
     req->requestid = kXR_open;
     req->mode      = mode;
-    req->options   = flags | kXR_async | kXR_retstat;
+    req->options   = (flags&0xffff) | kXR_async | kXR_retstat;
     req->dlen      = path.length();
+    URL sendUrl;
+    XRootDStatus st = FillFhTempl( self, *self->pFileUrl, msg, sendUrl );
+    if( !st.IsOK() )
+    {
+      delete openHandler;
+      self->pStatus    = st;
+      self->pFileState = Closed;
+      return st;
+    }
     msg->Append( path.c_str(), path.length(), 24 );
 
     XRootDTransport::SetDescription( msg );
@@ -864,7 +919,7 @@ namespace XrdCl
     params.followRedirects = self->pFollowRedirects;
     MessageUtils::ProcessSendParams( params );
 
-    XRootDStatus st = self->IssueRequest( *self->pFileUrl, msg, openHandler, params );
+    st = self->IssueRequest( sendUrl, msg, openHandler, params );
 
     if( !st.IsOK() )
     {
@@ -881,7 +936,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Close( std::shared_ptr<FileStateHandler> &self,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -960,7 +1015,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::Stat( std::shared_ptr<FileStateHandler> &self,
                                        bool                               force,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout )
+                                       time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1012,6 +1067,73 @@ namespace XrdCl
   }
 
   //----------------------------------------------------------------------------
+  // Preread scattered data tracts in one operation - async
+  //----------------------------------------------------------------------------
+  XRootDStatus FileStateHandler::PreRead( std::shared_ptr<FileStateHandler> &self,
+                                          const TractList                   &tracts,
+                                          ResponseHandler                   *handler,
+                                          time_t                             timeout )
+  {
+    //--------------------------------------------------------------------------
+    // Sanity check
+    //--------------------------------------------------------------------------
+    XrdSysMutexHelper scopedLock( self->pMutex );
+
+    if( self->pFileState == Error ) return self->pStatus;
+
+    if( self->pFileState != Opened && self->pFileState != Recovering )
+      return XRootDStatus( stError, errInvalidOp );
+
+    Log *log = DefaultEnv::GetLog();
+    log->Debug( FileMsg, "[%p@%s] Sending an read+preread command for handle %#x to %s",
+                (void*)self.get(), self->pFileUrl->GetObfuscatedURL().c_str(),
+                *((uint32_t*)self->pFileHandle), self->pDataServer->GetHostId().c_str() );
+
+    //--------------------------------------------------------------------------
+    // Build the message
+    //--------------------------------------------------------------------------
+    Message            *msg;
+    ClientReadRequest  *req;
+    MessageUtils::CreateRequest( msg, req, sizeof(readahead_list)*tracts.size() + 8 );
+
+    req->requestid = kXR_read;
+    req->offset    = 0;
+    req->rlen      = 0;
+    memcpy( req->fhandle, self->pFileHandle, 4 );
+    req->dlen      = sizeof(readahead_list)*tracts.size() + 8;
+
+    static char dummyBuff[8];
+    ChunkList *list   = new ChunkList();
+    list->push_back( ChunkInfo( 0, 0,  dummyBuff ) );
+
+    //--------------------------------------------------------------------------
+    // Copy the tract info
+    //--------------------------------------------------------------------------
+    readahead_list *dataTract = (readahead_list*)msg->GetBuffer( 24 + 8 );
+    for( size_t i = 0; i < tracts.size(); ++i )
+    {
+      dataTract[i].rlen   = tracts[i].length;
+      dataTract[i].offset = tracts[i].offset;
+      memcpy( dataTract[i].fhandle, req->fhandle, 4 );
+    }
+
+    //--------------------------------------------------------------------------
+    // Send the message
+    //--------------------------------------------------------------------------
+    MessageSendParams params;
+    params.timeout         = timeout;
+    params.followRedirects = false;
+    params.stateful        = true;
+    params.chunkList       = list;
+    MessageUtils::ProcessSendParams( params );
+
+    XRootDTransport::SetDescription( msg );
+    StatefulHandler *stHandler = new StatefulHandler( self, handler, msg, params );
+
+    return SendOrQueue( self, *self->pDataServer, msg, stHandler, params );
+  }
+
+  //----------------------------------------------------------------------------
   // Read a data chunk at a given offset - sync
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Read( std::shared_ptr<FileStateHandler> &self,
@@ -1019,7 +1141,7 @@ namespace XrdCl
                                        uint32_t         size,
                                        void            *buffer,
                                        ResponseHandler *handler,
-                                       uint16_t         timeout )
+                                       time_t           timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1065,7 +1187,7 @@ namespace XrdCl
                                          uint32_t                           size,
                                          void                              *buffer,
                                          ResponseHandler                   *handler,
-                                         uint16_t                           timeout )
+                                         time_t                             timeout )
   {
     int issupported = true;
     AnyObject obj;
@@ -1104,7 +1226,7 @@ namespace XrdCl
                                               size_t                             pgnb,
                                               void                              *buffer,
                                               PgReadHandler                     *handler,
-                                              uint16_t                           timeout )
+                                              time_t                             timeout )
   {
     if( size > (uint32_t)XrdSys::PageSize )
       return XRootDStatus( stError, errInvalidArgs, EINVAL,
@@ -1122,7 +1244,7 @@ namespace XrdCl
                                              void                              *buffer,
                                              uint16_t                           flags,
                                              ResponseHandler                   *handler,
-                                             uint16_t                           timeout )
+                                             time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1178,7 +1300,7 @@ namespace XrdCl
                                         uint32_t                           size,
                                         const void                        *buffer,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1225,7 +1347,7 @@ namespace XrdCl
                                         uint64_t                           offset,
                                         Buffer                           &&buffer,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // If the memory is not page (4KB) aligned we cannot use the kernel buffer
@@ -1277,7 +1399,7 @@ namespace XrdCl
                                         Optional<uint64_t>                 fdoff,
                                         int                                fd,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // Read the data from the file descriptor into a kernel buffer
@@ -1303,7 +1425,7 @@ namespace XrdCl
                                           const void                        *buffer,
                                           std::vector<uint32_t>             &cksums,
                                           ResponseHandler                   *handler,
-                                          uint16_t                           timeout )
+                                          time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // Resolve timeout value
@@ -1392,7 +1514,7 @@ namespace XrdCl
           }
           delete s;
           // first adjust the timeout value
-          uint16_t elapsed = ::time( nullptr ) - start;
+          time_t elapsed = ::time( nullptr ) - start;
           if( elapsed >= timeout )
           {
             pgwrt->SetStatus( new XRootDStatus( stError, errOperationExpired ) );
@@ -1459,7 +1581,7 @@ namespace XrdCl
                                                const void                        *buffer,
                                                uint32_t                           digest,
                                                ResponseHandler                   *handler,
-                                               uint16_t                           timeout )
+                                               time_t                             timeout )
   {
     std::vector<uint32_t> cksums{ digest };
     return PgWriteImpl( self, offset, size, buffer, cksums, PgReadFlags::Retry, handler, timeout );
@@ -1475,7 +1597,7 @@ namespace XrdCl
                                               std::vector<uint32_t>             &cksums,
                                               kXR_char                           flags,
                                               ResponseHandler                   *handler,
-                                              uint16_t                           timeout )
+                                              time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1525,7 +1647,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Sync( std::shared_ptr<FileStateHandler> &self,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout )
+                                       time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1564,7 +1686,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::Truncate( std::shared_ptr<FileStateHandler> &self,
                                            uint64_t                           size,
                                            ResponseHandler                   *handler,
-                                           uint16_t                           timeout )
+                                           time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1605,7 +1727,7 @@ namespace XrdCl
                                              const ChunkList                   &chunks,
                                              void                              *buffer,
                                              ResponseHandler                   *handler,
-                                             uint16_t                           timeout )
+                                             time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // Sanity check
@@ -1681,7 +1803,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::VectorWrite( std::shared_ptr<FileStateHandler> &self,
                                               const ChunkList                   &chunks,
                                               ResponseHandler                   *handler,
-                                              uint16_t                           timeout )
+                                              time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // Sanity check
@@ -1760,7 +1882,7 @@ namespace XrdCl
                                          const struct iovec                *iov,
                                          int                                iovcnt,
                                          ResponseHandler                   *handler,
-                                         uint16_t                           timeout )
+                                         time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1816,7 +1938,7 @@ namespace XrdCl
                                         struct iovec                      *iov,
                                         int                                iovcnt,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1866,14 +1988,16 @@ namespace XrdCl
     return SendOrQueue( self, *self->pDataServer, msg, stHandler, params );
   }
 
+
   //----------------------------------------------------------------------------
   // Performs a custom operation on an open file, server implementation
   // dependent - async
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Fcntl( std::shared_ptr<FileStateHandler> &self,
+                                        QueryCode::Code                    queryCode,
                                         const Buffer                      &arg,
                                         ResponseHandler                   *handler,
-                                        uint16_t                           timeout )
+                                        time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1892,10 +2016,10 @@ namespace XrdCl
     MessageUtils::CreateRequest( msg, req, arg.GetSize() );
 
     req->requestid = kXR_query;
-    req->infotype  = kXR_Qopaqug;
+    req->infotype  = queryCode;
     req->dlen      = arg.GetSize();
     memcpy( req->fhandle, self->pFileHandle, 4 );
-    msg->Append( arg.GetBuffer(), arg.GetSize(), 24 );
+    msg->Append( arg.GetBuffer(), arg.GetSize(), sizeof(ClientQueryRequest) );
 
     MessageSendParams params;
     params.timeout         = timeout;
@@ -1914,7 +2038,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::Visa( std::shared_ptr<FileStateHandler> &self,
                                        ResponseHandler                   *handler,
-                                       uint16_t                           timeout )
+                                       time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1954,7 +2078,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::SetXAttr( std::shared_ptr<FileStateHandler> &self,
                                            const std::vector<xattr_t>        &attrs,
                                            ResponseHandler                   *handler,
-                                           uint16_t                           timeout )
+                                           time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -1980,7 +2104,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::GetXAttr( std::shared_ptr<FileStateHandler> &self,
                                            const std::vector<std::string>    &attrs,
                                            ResponseHandler                   *handler,
-                                           uint16_t                           timeout )
+                                           time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2006,7 +2130,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::DelXAttr( std::shared_ptr<FileStateHandler> &self,
                                            const std::vector<std::string>    &attrs,
                                            ResponseHandler                   *handler,
-                                           uint16_t                           timeout )
+                                           time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2031,7 +2155,7 @@ namespace XrdCl
   //------------------------------------------------------------------------
   XRootDStatus FileStateHandler::ListXAttr( std::shared_ptr<FileStateHandler> &self,
                                             ResponseHandler  *handler,
-                                            uint16_t          timeout )
+                                            time_t            timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2067,7 +2191,7 @@ namespace XrdCl
   XRootDStatus FileStateHandler::Checkpoint( std::shared_ptr<FileStateHandler> &self,
                                              kXR_char                           code,
                                              ResponseHandler                   *handler,
-                                             uint16_t                           timeout )
+                                             time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2118,7 +2242,7 @@ namespace XrdCl
                                            uint32_t                           size,
                                            const void                        *buffer,
                                            ResponseHandler                   *handler,
-                                           uint16_t                           timeout )
+                                           time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2180,7 +2304,7 @@ namespace XrdCl
                                             const struct iovec                *iov,
                                             int                                iovcnt,
                                             ResponseHandler                   *handler,
-                                            uint16_t                           timeout )
+                                            time_t                             timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2416,6 +2540,11 @@ namespace XrdCl
     //--------------------------------------------------------------------------
     else
     {
+       //------------------------------------------------------------------------
+       // if requested file colocation or dup was done, don't do again on reopen
+       //------------------------------------------------------------------------
+       pOpenFlags &= ~(OpenFlags::Dup | OpenFlags::Samefs);
+
       //------------------------------------------------------------------------
       // Store the response info
       //------------------------------------------------------------------------
@@ -2443,6 +2572,7 @@ namespace XrdCl
         i.file       = pFileUrl;
         i.dataServer = pDataServer->GetHostId();
         i.oFlags     = pOpenFlags;
+        i.oFlags2    = pOpenFlags>>16;
         i.fSize      = pStatInfo ? pStatInfo->GetSize() : 0;
         mon->Event( Monitor::EvOpen, &i );
       }
@@ -2772,7 +2902,7 @@ namespace XrdCl
   //------------------------------------------------------------------------
   // Try other data server
   //------------------------------------------------------------------------
-  XRootDStatus FileStateHandler::TryOtherServer( std::shared_ptr<FileStateHandler> &self, uint16_t timeout )
+  XRootDStatus FileStateHandler::TryOtherServer( std::shared_ptr<FileStateHandler> &self, time_t timeout )
   {
     XrdSysMutexHelper scopedLock( self->pMutex );
 
@@ -2813,7 +2943,7 @@ namespace XrdCl
                                                kXR_char                           options,
                                                const std::vector<T>              &attrs,
                                                ResponseHandler                   *handler,
-                                               uint16_t                           timeout )
+                                               time_t                             timeout )
   {
     //--------------------------------------------------------------------------
     // Issue a new fattr request
@@ -2910,8 +3040,10 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   bool FileStateHandler::IsReadOnly() const
   {
-    if( (pOpenFlags & kXR_open_read) && !(pOpenFlags & kXR_open_updt) &&
-        !(pOpenFlags & kXR_open_apnd ) )
+    // Keeping the check for append (with a cast) as this was previously tested,
+    // but OpenFlags::Flags does not currently enumerate the Append flag
+    if( (pOpenFlags & OpenFlags::Read) && !(pOpenFlags & OpenFlags::Update) &&
+        !(pOpenFlags & static_cast<OpenFlags::Flags>(kXR_open_apnd)) )
       return true;
     return false;
   }
@@ -2984,7 +3116,7 @@ namespace XrdCl
   // Send a close and ignore the response
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::SendClose( std::shared_ptr<FileStateHandler> &self,
-                                            uint16_t                           timeout )
+                                            time_t                             timeout )
   {
     Message            *msg;
     ClientCloseRequest *req;
@@ -3012,7 +3144,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   XRootDStatus FileStateHandler::ReOpenFileAtServer( std::shared_ptr<FileStateHandler> &self,
                                                      const URL                         &url,
-                                                     uint16_t                           timeout )
+                                                     time_t                             timeout )
   {
     Log *log = DefaultEnv::GetLog();
     log->Dump( FileMsg, "[%p@%s] Sending a recovery open command to %s",
@@ -3023,13 +3155,13 @@ namespace XrdCl
     // procedure to delete a file that has been partially updated or fail it
     // because a partially uploaded file already exists.
     //--------------------------------------------------------------------------
-    if( self->pOpenFlags & kXR_delete)
+    if( self->pOpenFlags & OpenFlags::Delete)
     {
-      self->pOpenFlags &= ~kXR_delete;
-      self->pOpenFlags |=  kXR_open_updt;
+      self->pOpenFlags &= ~OpenFlags::Delete;
+      self->pOpenFlags |=  OpenFlags::Update;
     }
 
-    self->pOpenFlags &= ~kXR_new;
+    self->pOpenFlags &= ~OpenFlags::New;
 
     Message           *msg;
     ClientOpenRequest *req;
@@ -3043,8 +3175,16 @@ namespace XrdCl
 
     req->requestid = kXR_open;
     req->mode      = self->pOpenMode;
-    req->options   = self->pOpenFlags;
+    req->options   = (self->pOpenFlags & 0xffff);
     req->dlen      = path.length();
+    URL sendUrl;
+    XRootDStatus st = FillFhTempl( self, url, msg, sendUrl );
+    if( !st.IsOK() )
+    {
+      self->pStatus    = st;
+      self->pFileState = Closed;
+      return st;
+    }
     msg->Append( path.c_str(), path.length(), 24 );
 
     // create a new reopen handler
@@ -3058,7 +3198,7 @@ namespace XrdCl
     //--------------------------------------------------------------------------
     // Issue the open request
     //--------------------------------------------------------------------------
-    XRootDStatus st = self->IssueRequest( url, msg, openHandler, params );
+    st = self->IssueRequest( sendUrl, msg, openHandler, params );
 
     // if there was a problem destroy the open handler
     if( !st.IsOK() )
@@ -3254,7 +3394,7 @@ namespace XrdCl
                                                     uint32_t                               length,
                                                     std::unique_ptr<XrdSys::KernelBuffer>  kbuff,
                                                     ResponseHandler                       *handler,
-                                                    uint16_t                               timeout )
+                                                    time_t                                 timeout )
   {
     //--------------------------------------------------------------------------
     // Create the write request
@@ -3289,6 +3429,143 @@ namespace XrdCl
 
     XRootDTransport::SetDescription( msg );
     StatefulHandler *stHandler = new StatefulHandler( self, handler, msg, params );
+
+    return SendOrQueue( self, *self->pDataServer, msg, stHandler, params );
+  }
+
+  //------------------------------------------------------------------------
+  // Fills in the file template value and optiont fields that need the
+  // template (i.e. samefs and dup) in an Open message request
+  //------------------------------------------------------------------------
+  XRootDStatus FileStateHandler::FillFhTempl(
+                                   std::shared_ptr<FileStateHandler> &self,
+                                   const URL &url, Message *msg, URL &sendUrl)
+  {
+    ClientOpenRequest *req = (ClientOpenRequest*)msg->GetBuffer();
+    sendUrl = url;
+
+    if( !self->NeedFileTempl() )
+    {
+      // template file not requireed
+      return XRootDStatus();
+    }
+
+    using wp = std::weak_ptr<FileStateHandler>;
+    if( !self->pTemplateFileWp.owner_before(wp{}) &&
+        !wp{}.owner_before(self->pTemplateFileWp) )
+    {
+      // no tempalte file was set
+      return XRootDStatus( stError, errInvalidArgs, 0,
+                           "File flags required a template file" );
+    }
+
+    // all the options that need template
+    if( self->pOpenFlags & OpenFlags::Dup )
+      req->optiont |= kXR_dup;
+    if( self->pOpenFlags & OpenFlags::Samefs )
+      req->optiont |= kXR_samefs;
+
+    std::shared_ptr<FileStateHandler> tfp = self->pTemplateFileWp.lock();
+    if(!tfp)
+      return XRootDStatus( stError, errInvalidArgs, 0,
+                           "Template file object does not exist" );
+
+    XrdSysMutexHelper scopedLock( tfp->pMutex );
+
+    if( tfp->pFileState != Opened )
+      return XRootDStatus( stError, errInvalidOp, 0,
+                           "Template file not open" );
+
+    if (!tfp->pDataServer || !tfp->pFileHandle)
+      return XRootDStatus( stError, errInvalidArgs, 0,
+                           "Template file not connected" );
+
+    sendUrl.SetHostPort( tfp->pDataServer->GetHostName(),tfp->pDataServer->GetPort() );
+    sendUrl.SetUserName( tfp->pDataServer->GetUserName() );
+    msg->SetSessionId( tfp->pSessionId );
+    memcpy( req->fhtemplt, tfp->pFileHandle, sizeof(req->fhtemplt) );
+
+    if( !Utils::HasKSameFS( sendUrl ) )
+      return XRootDStatus( stError, errNotSupported );
+
+    return XRootDStatus();
+  }
+
+  //------------------------------------------------------------------------
+  // Clone file ranges into current file
+  //------------------------------------------------------------------------
+  XRootDStatus FileStateHandler::Clone(std::shared_ptr<FileStateHandler> &self,
+                                       const CloneLocations &locs,
+                                       ResponseHandler *handler,
+                                       time_t           timeout )
+  {
+    XrdSysMutexHelper scopedLock( self->pMutex );
+
+    if( self->pFileState == Error ) return self->pStatus;
+
+    if( self->pFileState != Opened && self->pFileState != Recovering )
+      return XRootDStatus( stError, errInvalidOp );
+
+    if( !Utils::HasKSameFS( *self->pDataServer ) )
+      return XRootDStatus( stError, errNotSupported );
+
+    Log *log = DefaultEnv::GetLog();
+    log->Debug( FileMsg, "[%p@%s] Sending a clone command for handle %#x to %s",
+                self.get(), self->pFileUrl->GetURL().c_str(),
+                *((uint32_t*)self->pFileHandle), self->pDataServer->GetHostId().c_str() );
+
+    Message           *msg;
+    ClientReadRequest *req;
+
+    size_t nrange = locs.locations.size();
+
+    MessageUtils::CreateRequest( msg, req, sizeof(XrdProto::clone_list)*nrange );
+
+    req->requestid  = kXR_clone;
+    req->dlen       = sizeof(XrdProto::clone_list)*nrange;
+    memcpy( req->fhandle, self->pFileHandle, 4 );
+
+    XrdProto::clone_list *cl = (XrdProto::clone_list*)msg->GetBuffer( 24 );
+    int idx=0;
+    for(auto &loc: locs.locations)
+    {
+      if( !loc.file )
+        return XRootDStatus( stError, errInvalidOp, 0,
+                             "Template file not available" );
+
+      FileStateHandlerTemplate *fht = dynamic_cast<FileStateHandlerTemplate*>(loc.file.get());
+      if( !fht )
+        return XRootDStatus( stError, errInvalidOp, 0,
+                             "Template file invalid" );
+
+      std::shared_ptr<FileStateHandler> tfp = fht->pTemplateFileWp.lock();
+      if( !tfp )
+        return XRootDStatus( stError, errInvalidOp, 0,
+                             "Template file object does not exist" );
+
+      XrdSysMutexHelper scopedLock( tfp->pMutex );
+      if( tfp->pFileState != Opened )
+        return XRootDStatus( stError, errInvalidOp, 0,
+                             "Template file not open" );
+
+      if( tfp->pSessionId != self->pSessionId )
+        return XRootDStatus( stError, errInvalidOp, 0,
+                             "Clone source not at same location as destination" );
+
+      memcpy( cl[idx].srcFH, tfp->pFileHandle, 4 );
+      cl[idx].srcOffs = loc.srcOffs;
+      cl[idx].srcLen  = loc.srcLen;
+      cl[idx].dstOffs = loc.dstOffs;
+      ++idx;
+    }
+
+    XRootDTransport::SetDescription( msg );
+    MessageSendParams params;
+    params.timeout         = timeout;
+    params.followRedirects = false;
+    params.stateful        = true;
+    MessageUtils::ProcessSendParams( params );
+    StatefulHandler  *stHandler = new StatefulHandler( self, handler, msg, params );
 
     return SendOrQueue( self, *self->pDataServer, msg, stHandler, params );
   }

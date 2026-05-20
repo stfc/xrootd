@@ -65,6 +65,7 @@
 /******************************************************************************/
   
 XrdSysError_Table *XrdSysError::etab = 0;
+XrdSysError_Table_Errno *XrdSysError::etab_errno = 0;
 
 /******************************************************************************/
 /*                                b a s e F D                                 */
@@ -87,7 +88,27 @@ const char *XrdSysError::ec2text(int ecode)
     if (!etxt) etxt = XrdSysE2T(xcode);
     return etxt;
 }
-  
+
+/******************************************************************************/
+/*                               e c 2 e r r n o                              */
+/******************************************************************************/
+
+int XrdSysError::ec2errno(int ecode)
+{
+    int xcode = 0;
+    XrdSysError_Table_Errno *etp = etab_errno;
+
+    int sign = (ecode < 0 ? -1 : 1);
+    int absE = ecode * sign;
+
+    while ((etp != 0) && !(xcode = etp->Lookup(absE)))
+        etp = etp->next;
+
+    // if errcode is mapped return
+    // otherwise return the original err code
+    return xcode ? xcode * sign : ecode;
+}
+
 /******************************************************************************/
 /*                                  E m s g                                   */
 /******************************************************************************/

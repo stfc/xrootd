@@ -1,5 +1,6 @@
 #ifndef __XRDPOSIXEXTERN_H__
 #define __XRDPOSIXEXTERN_H__
+#include "XrdSys/XrdSysStatx.hh"
 /******************************************************************************/
 /*                                                                            */
 /*                     X r d P o s i x E x t e r n . h h                      */
@@ -118,6 +119,8 @@ extern int        XrdPosix_Fseeko(FILE *stream, off_t offset, int whence);
 
 extern int        XrdPosix_Fstat(int fildes, struct stat *buf);
 
+extern int        XrdPosix_Fstatat(int dirfd, const char* path, struct stat *buf, int flags);
+
 #ifdef __linux__
 extern int        XrdPosix_FstatV(int ver, int fildes, struct stat *buf);
 #endif
@@ -178,6 +181,11 @@ extern int        XrdPosix_Statfs(const char *path, struct statfs *buf);
 
 extern int        XrdPosix_Statvfs(const char *path, struct statvfs *buf);
 
+extern int        XrdPosix_Statx(int dirfd, const char *path, int flags,
+                                 unsigned int mask, XrdSysStatx *stx);
+
+extern int        XrdPosix_Openat(int dirfd, const char *path, int flag, ...);
+  
 extern ssize_t    XrdPosix_Pwrite(int fildes, const void *buf, size_t nbyte, off_t offset);
 
 extern long       XrdPosix_Telldir(DIR *dirp);

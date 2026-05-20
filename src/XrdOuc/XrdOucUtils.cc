@@ -35,6 +35,7 @@
 #include <vector>
 #include <unordered_set>
 #include <algorithm>
+#include <charconv>
 
 #include <regex.h>
 
@@ -49,6 +50,7 @@
 #include <sys/types.h>
 #endif
 #include <map>
+#include <iomanip>
 #include "XrdNet/XrdNetUtils.hh"
 #include "XrdOuc/XrdOucCRC.hh"
 #include "XrdOuc/XrdOucEnv.hh"
@@ -454,6 +456,46 @@ int XrdOucUtils::fmtBytes(long long val, char *buff, int bsz)
 // Format it
 //
    return snprintf(buff, bsz, "%lld.%d%c", val, resid, sName);
+}
+
+std::string XrdOucUtils::genHumanSize(size_t size, uint64_t base) {
+   static const char* units[] = {"", "K", "M", "G", "T", "P", "E"};
+   const int maxUnit = 6;
+
+   double value = static_cast<double>(size);
+   int unitIndex = 0;
+
+   while (value >= static_cast<double>(base) && unitIndex < maxUnit) {
+      value /= static_cast<double>(base);
+      ++unitIndex;
+   }
+
+   auto ceil_to = [](double x, int decimals) {
+      if (x == 0.0) return 0.0; // avoid creating a -0 in the output
+      const double p = std::pow(10.0, decimals);
+      // small epsilon to avoid 1.0 becoming 1.1 due to floating noise
+      return std::ceil(x * p - 1e-12) / p;
+   };
+
+   auto decimals_for = [](double x, int u) {
+      return (u > 0 && x < 10.0) ? 1 : 0;   // e.g: 1.0G for exact powers
+   };
+
+   int prec = decimals_for(value, unitIndex);
+   double shown = ceil_to(value, prec);
+
+   // If rounding pushed us to the next unit (e.g. 1024.0K), promote
+   if (shown >= static_cast<double>(base) && unitIndex < maxUnit) {
+      shown /= static_cast<double>(base);
+      ++unitIndex;
+
+      prec = decimals_for(shown, unitIndex);
+      shown = ceil_to(shown, prec);
+   }
+
+   std::ostringstream out;
+   out << std::fixed << std::setprecision(prec) << shown << units[unitIndex];
+   return out.str();
 }
 
 /******************************************************************************/
@@ -1504,6 +1546,21 @@ void XrdOucUtils::trim(std::string_view & sv) {
 
   sv = sv.substr(start, end - start);
 }
+
+uint8_t XrdOucUtils::touint8_t(const std::string_view sv) {
+  unsigned int temp; // wider type for parsing
+  auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), temp);
+
+  if (ec == std::errc::invalid_argument) {
+    throw std::invalid_argument("Invalid number format");
+  }
+  if (ec == std::errc::result_out_of_range || temp > std::numeric_limits<uint8_t>::max()) {
+    throw std::out_of_range("Value out of range for unsigned short");
+  }
+
+  return static_cast<unsigned short>(temp);
+}
+
 /**
  * Returns a boolean indicating whether 'c' is a valid token character or not.
  * See https://datatracker.ietf.org/doc/html/rfc6750#section-2.1 for details.
@@ -1561,6 +1618,115 @@ std::string obfuscateAuth(const std::string& input)
   }
 
   return redacted.append(text + offset);
+}
+
+static bool is_rfc3986_unreserved(unsigned char c)
+{
+  return std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~';
+}
+
+/**
+ * This function takes a string and returns the URL encoded string
+ * (rfc3986).
+ *
+ * @param input the string to be encoded
+ * @return the string URL encoded
+ */
+std::string XrdOucUtils::UrlEncode(const std::string &input)
+{
+  static const char hex[] = "0123456789ABCDEF";
+
+  std::string out;
+  out.reserve(input.size() * 3);
+
+  for (unsigned char c: input) {
+    if (is_rfc3986_unreserved(c)) {
+      out.push_back(c);
+    } else {
+      out.push_back('%');
+      out.push_back(hex[c >> 4]);
+      out.push_back(hex[c & 0x0f]);
+    }
+  }
+  return out;
+}
+
+static int from_hex(char c)
+{
+  if (c >= '0' && c <= '9') return c - '0';
+  if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+  if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+  return -1;
+}
+
+/**
+ * This function takes a string and returns the URL decoded string
+ * (rfc3986), also decoding + as ' ' (common in HTML form encoding).
+ *
+ * @param input the URL encoded string
+ * @return the string URL decoded
+ */
+std::string XrdOucUtils::UrlDecode(const std::string &input)
+{
+  std::string out;
+  out.reserve(input.size());
+
+  for (size_t i = 0; i < input.size(); ++i) {
+    if (input[i] == '%' && i + 2 < input.size() &&
+        std::isxdigit(input[i + 1]) &&
+        std::isxdigit(input[i + 2])) {
+      const int hi = from_hex(input[i + 1]);
+      const int lo = from_hex(input[i + 2]);
+      out.push_back(static_cast<char>((hi << 4) | lo));
+      i += 2;
+    } else if (input[i] == '+') {
+      out.push_back(' ');
+    } else {
+      out.push_back(input[i]);
+    }
+  }
+  return out;
+}
+
+/**
+ * Strip selected CGI elements (e.g. "authz=...") from a string/URL.
+ *
+ * @param url the string/URL to sanitize
+ * @param cgiKeys CGI parameter names to remove (without the trailing '=')
+ */
+
+void stripCgi(std::string& url, const std::unordered_set<std::string> &cgiKeys)
+{
+  for (const auto &key : cgiKeys) {
+    if (key.empty())
+      continue;
+
+    const std::string needle = key + "=";
+    size_t spos = 0, epos = 0;
+
+    while ((spos = url.find(needle, spos)) != std::string::npos) {
+      epos = spos;
+      while (epos < url.size() && is_token_character(url[epos]))
+        ++epos;
+      url.erase(spos, epos - spos);
+    }
+  }
+
+  // If a stripped CGI was the first element, remove the extra &
+  size_t spos = 0;
+  if ((spos = url.find("?&")) != std::string::npos)
+    url.erase(spos + 1, 1);
+
+  // If stripping removed the only query parameter, remove the dangling ?
+  if (!url.empty() && url.back() == '?')
+    url.pop_back();
+}
+
+void stripCgi(XrdOucString& url, const std::unordered_set<std::string> &cgiKeys)
+{
+  std::string tmp = url.c_str();
+  stripCgi(tmp, cgiKeys);
+  url = tmp.c_str();
 }
 
 #endif

@@ -29,10 +29,10 @@ jobs:
 
     steps:
     - name: Install git
-      run: yum install -y git
+      run: dnf install -y git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -62,7 +62,7 @@ jobs:
       run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: alma8
         path: RPMS
@@ -75,10 +75,10 @@ jobs:
 
     steps:
     - name: Install git
-      run: yum install -y git
+      run: dnf install -y git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -107,23 +107,23 @@ jobs:
       run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: alma9
         path: RPMS
         retention-days: 14
 
-  alma10beta:
+  alma10:
     name: Alma Linux 10
     runs-on: ubuntu-latest
     container: almalinux:10
 
     steps:
     - name: Install git
-      run: yum install -y git
+      run: dnf install -y git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -152,23 +152,23 @@ jobs:
       run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: alma10
         path: RPMS
         retention-days: 14
 
   fedora:
-    name: Fedora 42
+    name: Fedora 43
     runs-on: ubuntu-latest
-    container: fedora:42
+    container: fedora:43
 
     steps:
     - name: Install git
-      run: yum install -y git
+      run: dnf install -y git
 
     - name: Clone repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
 
@@ -196,8 +196,8 @@ jobs:
       run: mkdir RPMS && mv $(rpm -E '%{_rpmdir}')/ RPMS$(rpm -E '%{dist}' | tr . /)
 
     - name: Upload Artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
-        name: fc42
+        name: fc43
         path: RPMS
         retention-days: 14

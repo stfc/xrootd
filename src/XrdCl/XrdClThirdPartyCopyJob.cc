@@ -110,7 +110,7 @@ namespace
   {
     public:
 
-      InitTimeoutCalc( uint16_t timeLeft ) :
+      InitTimeoutCalc( time_t timeLeft ) :
         hasInitTimeout( timeLeft ), start( time( 0 ) ), timeLeft( timeLeft )
       {
 
@@ -128,15 +128,20 @@ namespace
         return XrdCl::XRootDStatus();
       }
 
-      operator uint16_t()
+      // used to fetch a timeout count in 2 situations: to pass to XrdCl methods
+      // and preserve remaining timeout at end of CanDo(). Zero has special
+      // meaning in both these contexts, so if we had an initial timeout we
+      // return a current timeout of at least 1.
+      operator time_t()
       {
-        return timeLeft;
+        if( !hasInitTimeout ) return timeLeft;
+        return timeLeft ? timeLeft : 1;
       }
 
     private:
       bool hasInitTimeout;
       time_t start;
-      uint16_t timeLeft;
+      time_t timeLeft;
   };
 
   static XrdCl::XRootDStatus& UpdateErrMsg( XrdCl::XRootDStatus &status, const std::string &str )
@@ -153,7 +158,7 @@ namespace XrdCl
   //----------------------------------------------------------------------------
   // Constructor
   //----------------------------------------------------------------------------
-  ThirdPartyCopyJob::ThirdPartyCopyJob( uint16_t      jobId,
+  ThirdPartyCopyJob::ThirdPartyCopyJob( uint32_t      jobId,
                                         PropertyList *jobProperties,
                                         PropertyList *jobResults ):
     CopyJob( jobId, jobProperties, jobResults ),
@@ -624,7 +629,7 @@ namespace XrdCl
       }
     }
 
-    initTimeout = uint16_t( timeLeft );
+    initTimeout = time_t( timeLeft );
 
     return XRootDStatus();
   }
@@ -709,7 +714,7 @@ namespace XrdCl
     XrdSysSemaphore  *sem  = statusHandler.GetXrdSysSemaphore();
     StatInfo         *info   = 0;
 
-    uint16_t tpcTimeout = 0;
+    time_t   tpcTimeout = 0;
     pProperties->Get( "tpcTimeout", tpcTimeout );
 
     st = dstFile.Sync( &statusHandler, tpcTimeout );
@@ -828,7 +833,7 @@ namespace XrdCl
     XrdSysSemaphore  *sem  = statusHandler.GetXrdSysSemaphore();
     StatInfo         *info   = 0;
 
-    uint16_t tpcTimeout = 0;
+    time_t   tpcTimeout = 0;
     pProperties->Get( "tpcTimeout", tpcTimeout );
 
     st = dstFile.Sync( &statusHandler, tpcTimeout );

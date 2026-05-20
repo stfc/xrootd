@@ -24,7 +24,9 @@ include( XrdHeaders )
 add_library(XrdUtils SHARED)
 
 set_target_properties(XrdUtils
-  PROPERTIES BUILD_RPATH $ORIGIN VERSION 3.0.0 SOVERSION 3
+  PROPERTIES BUILD_RPATH $ORIGIN
+  SOVERSION ${XRootD_VERSION_MAJOR}
+  VERSION ${XRootD_LIBVERSION}
 )
 
 target_link_libraries(XrdUtils
@@ -69,13 +71,16 @@ add_subdirectory( XrdXml )
 
 add_subdirectory( XrdCl )
 add_subdirectory( XrdClHttp )
+add_subdirectory( XrdClS3 )
 add_subdirectory( XrdEc )
 
 if( NOT XRDCL_ONLY )
   add_library(XrdServer SHARED)
 
   set_target_properties(XrdServer
-    PROPERTIES VERSION 3.0.0 SOVERSION 3
+    PROPERTIES
+      SOVERSION ${XRootD_VERSION_MAJOR}
+      VERSION ${XRootD_LIBVERSION}
   )
 
   target_link_libraries(XrdServer
@@ -105,6 +110,7 @@ if( NOT XRDCL_ONLY )
   add_subdirectory( XrdPss )
   add_subdirectory( XrdSsi )
   add_subdirectory( XrdPfc )
+  add_subdirectory( XrdOssArc )
   add_subdirectory( XrdOssCsi )
   add_subdirectory( XrdOssStats )
   add_subdirectory( XrdThrottle )

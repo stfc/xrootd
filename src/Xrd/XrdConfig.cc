@@ -2494,13 +2494,18 @@ do {     if (!strcmp(val,   "detail")) SSLmsgs = true;
 
              parms: {certdir | certfile} <path>
 
-             opts:  [crlcheck {all | external | last}] [log {failure | off}]
+             opts:  allow-missing-crl
+
+                    [crlcheck {all | external | last}] [log {failure | off}]
 
                     [[no]proxies] [refresh t[m|h|s]] [verdepth <n>]
 
              noverify client's cert need not be verified.
              <path>   is the the certificate path or file to be used.
                       Both a file and a directory path can be specified.
+             allow-missing-crl
+                      Ignores possible missing certificates crls which are
+                      presumed to be empty.
              crlcheck Controls internal crl checks:
                       all       applies crls to the full chain
                       external leaves crl checking to an external plug-in
@@ -2532,12 +2537,16 @@ int XrdConfig::xtlsca(XrdSysError *eDest, XrdOucStream &Config)
       }
    tlsNoVer = false;
 
-
    do {if (!strcmp(val, "proxies") || !strcmp("noproxies", val))
           {if (*val == 'n') tlsOpts |=  XrdTlsContext::nopxy;
               else          tlsOpts &= ~XrdTlsContext::nopxy;
            continue;
           }
+
+         if (!strcmp(val,"allow-missing-crl")) {
+            tlsOpts |= XrdTlsContext::crlAM;
+            continue;
+         }
 
        if (strlen(val) >= (int)sizeof(kword))
           {eDest->Emsg("Config", "Invalid tlsca parameter -", val);
@@ -2590,8 +2599,7 @@ int XrdConfig::xtlsca(XrdSysError *eDest, XrdOucStream &Config)
                {if (XrdOuca2x::a2i(*eDest,"tlsca verdepth",val,&vd,1,255))
                    return 1;
                 tlsOpts = TLS_SET_VDEPTH(tlsOpts,vd);
-               }
-       else {eDest->Emsg("Config", "invalid tlsca option -",kword); return 1;}
+               } else {eDest->Emsg("Config", "invalid tlsca option -",kword); return 1;}
 
        } while((val = Config.GetWord()));
 

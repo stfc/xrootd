@@ -42,6 +42,7 @@
 #include "XrdPosix/XrdPosixOsDep.hh"
 #include "XrdPosix/XrdPosixXrootd.hh"
 #include "XrdSys/XrdSysPlatform.hh"
+#include "XrdSys/XrdSysStatx.hh"
 
 /******************************************************************************/
 /*                Posix Symbols vs Return Valus and Arguments                 */
@@ -56,15 +57,15 @@
 #define Symb_Access UNIX_PFX "access"
 #define Retv_Access int
 #define Args_Access const char *path, int amode
-  
+
 #define Symb_Acl UNIX_PFX "acl"
 #define Retv_Acl int
 #define Args_Acl const char *, int, int, void *
-  
+
 #define Symb_Chdir UNIX_PFX "chdir"
 #define Retv_Chdir int
 #define Args_Chdir const char *path
-  
+
 #define Symb_Close UNIX_PFX "close"
 #define Retv_Close int
 #define Args_Close int
@@ -135,7 +136,7 @@
 #define Args_Fseeko64 FILE *, off64_t, int
 #endif
 
-#if defined(__linux__) and defined(_STAT_VER)
+#if defined(__linux__) && defined(_STAT_VER)
 #define Symb_Fstat UNIX_PFX "__fxstat"
 #define Retv_Fstat int
 #define Args_Fstat int, int, struct stat *
@@ -145,7 +146,7 @@
 #define Args_Fstat int, struct stat *
 #endif
 
-#if defined(__linux__) and defined(_STAT_VER)
+#if defined(__linux__) && defined(_STAT_VER)
 #define Symb_Fstat64 UNIX_PFX "__fxstat64"
 #define Retv_Fstat64 int
 #define Args_Fstat64 int, int, struct stat64 *
@@ -160,6 +161,14 @@
 #define Args_Fstat64 int, struct stat64 *
 #endif
 #endif
+
+#define Symb_Fstatat UNIX_PFX "fstatat"
+#define Retv_Fstatat int
+#define Args_Fstatat int, const char*, struct stat *, int
+
+#define Symb_Fstatat64 UNIX_PFX "fstatat64"
+#define Retv_Fstatat64 int
+#define Args_Fstatat64 int, const char*, struct stat64 *, int
 
 #define Symb_Fsync UNIX_PFX "fsync"
 #define Retv_Fsync int
@@ -227,7 +236,7 @@
 #define Args_Lseek64 int, off64_t, int
 #endif
 
-#if defined(__linux__) and defined(_STAT_VER)
+#if defined(__linux__) && defined(_STAT_VER)
 #define Symb_Lstat UNIX_PFX "__lxstat"
 #define Retv_Lstat int
 #define Args_Lstat int, const char *, struct stat *
@@ -237,7 +246,7 @@
 #define Args_Lstat const char *, struct stat *
 #endif
 
-#if defined(__linux__) and defined(_STAT_VER)
+#if defined(__linux__) && defined(_STAT_VER)
 #define Symb_Lstat64 UNIX_PFX "__lxstat64"
 #define Retv_Lstat64 int
 #define Args_Lstat64 int, const char *, struct stat64 *
@@ -261,6 +270,14 @@
 #define Retv_Open int
 #define Args_Open const char *, int, ...
 
+#define Symb_Openat UNIX_PFX "openat"
+#define Retv_Openat int
+#define Args_Openat const char *, int, ...
+
+#define Symb_Openat64 UNIX_PFX "openat64"
+#define Retv_Openat64 int
+#define Args_Openat64 const char *, int, ...
+
 #ifdef __APPLE__
 #define Symb_Open64 UNIX_PFX "open"
 #define Retv_Open64 int
@@ -274,7 +291,7 @@
 #define Symb_Opendir UNIX_PFX "opendir"
 #define Retv_Opendir DIR *
 #define Args_Opendir const char *
-  
+
 #define Symb_Pathconf UNIX_PFX "pathconf"
 #define Retv_Pathconf long
 #define Args_Pathconf const char *, int
@@ -282,7 +299,7 @@
 #define Symb_Pread UNIX_PFX "pread"
 #define Retv_Pread ssize_t
 #define Args_Pread int, void *, size_t, off_t
-  
+
 #ifdef __APPLE__
 #define Symb_Pread64 UNIX_PFX "pread"
 #define Retv_Pread64 ssize_t
@@ -310,7 +327,7 @@
 #define Symb_Read UNIX_PFX "read"
 #define Retv_Read ssize_t
 #define Args_Read int, void *, size_t
-  
+
 #define Symb_Readv UNIX_PFX "readv"
 #define Retv_Readv ssize_t
 #define Args_Readv int, const struct iovec *, int
@@ -369,7 +386,7 @@
 #define Args_Stat const char *, struct stat *
 #endif
 
-#if defined(__linux__) and defined(_STAT_VER)
+#if defined(__linux__) && defined(_STAT_VER)
 #define Symb_Stat64 UNIX_PFX "__xstat64"
 #define Retv_Stat64 int
 #define Args_Stat64 int, const char *, struct stat64 *
@@ -413,6 +430,10 @@
 #define Args_Statvfs64 const char *, struct statvfs64 *
 #endif
 
+#define Symb_Statx   UNIX_PFX "statx"
+#define Retv_Statx   int
+#define Args_Statx   int, const char *, int, unsigned int, XrdSysStatx *
+
 #define Symb_Telldir UNIX_PFX "telldir"
 #define Retv_Telldir long
 #define Args_Telldir DIR *
@@ -446,7 +467,7 @@
 /******************************************************************************/
 /*            C a l l   O u t   V e c t o r   D e f i n i t i o n             */
 /******************************************************************************/
-  
+
 class XrdPosixLinkage
 {public:
       int              Init(int *X=0) {if (!Done) Done = Resolve(); return 0;}
@@ -469,6 +490,8 @@ class XrdPosixLinkage
       Retv_Fseeko64    (*Fseeko64)(Args_Fseeko64);
       Retv_Fstat       (*Fstat)(Args_Fstat);
       Retv_Fstat64     (*Fstat64)(Args_Fstat64);
+      Retv_Fstatat     (*Fstatat)(Args_Fstatat);
+      Retv_Fstatat64   (*Fstatat64)(Args_Fstatat64);
       Retv_Fsync       (*Fsync)(Args_Fsync);
       Retv_Ftell       (*Ftell)(Args_Ftell);
       Retv_Ftello      (*Ftello)(Args_Ftello);
@@ -486,6 +509,8 @@ class XrdPosixLinkage
       Retv_Mkdir       (*Mkdir)(Args_Mkdir);
       Retv_Open        (*Open)(Args_Open);
       Retv_Open64      (*Open64)(Args_Open64);
+      Retv_Openat      (*Openat)(Args_Openat);
+      Retv_Openat64    (*Openat64)(Args_Openat64);
       Retv_Opendir     (*Opendir)(Args_Opendir);
       Retv_Pathconf    (*Pathconf)(Args_Pathconf);
       Retv_Pread       (*Pread)(Args_Pread);
@@ -508,6 +533,7 @@ class XrdPosixLinkage
       Retv_Statfs64    (*Statfs64)(Args_Statfs64);
       Retv_Statvfs     (*Statvfs)(Args_Statvfs);
       Retv_Statvfs64   (*Statvfs64)(Args_Statvfs64);
+      Retv_Statx       (*Statx)(Args_Statx);
       Retv_Telldir     (*Telldir)(Args_Telldir);
       Retv_Truncate    (*Truncate)(Args_Truncate);
       Retv_Truncate64  (*Truncate64)(Args_Truncate64);

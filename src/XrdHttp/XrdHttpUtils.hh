@@ -34,6 +34,8 @@
  * 
  * 
  */
+#ifndef XRDHTTPUTILS_HH
+#define	XRDHTTPUTILS_HH
 
 #include "XProtocol/XPtypes.hh"
 #include "XProtocol/XProtocol.hh"
@@ -45,9 +47,7 @@
 #include <vector>
 #include <memory>
 #include <sstream>
-
-#ifndef XRDHTTPUTILS_HH
-#define	XRDHTTPUTILS_HH
+#include <cstdint>
 
 enum : int {
   HTTP_CONTINUE                        = 100,
@@ -122,11 +122,6 @@ enum : int {
   HTTP_NETWORK_AUTHENTICATION_REQUIRED = 511,
 };
 
-// GetHost from URL
-// Parse an URL and extract the host name and port
-// Return 0 if OK
-int parseURL(char *url, char *host, int &port, char **path);
-
 // Simple itoa function
 std::string itos(long i);
 
@@ -152,9 +147,17 @@ int compareHash(
         const char *h2);
 
 
-bool Fromhexdigest(const unsigned char *input, int length, unsigned char *out);
+bool Fromhexdigest(const std::string & hex, std::vector<uint8_t> & outputBytes);
 
 void Tobase64(const unsigned char *input, int length, char *out);
+
+void Tobase64(const std::vector<uint8_t> & input, std::string & base64Output);
+
+void base64ToBytes(const std::string & base64digest, std::vector<uint8_t> & outputBytes);
+
+void bytesToHex(const std::vector<uint8_t> & bytes, std::string & hexOutput);
+
+void base64DecodeHex(const std::string & base64, std::string & hexOutput);
 
 // Create a new quoted string
 char *quote(const char *str);

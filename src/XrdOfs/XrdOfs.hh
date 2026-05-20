@@ -35,6 +35,7 @@
   
 #include "XrdOfs/XrdOfsEvr.hh"
 #include "XrdOfs/XrdOfsHandle.hh"
+#include "XrdOuc/XrdOucCloneSeg.hh"
 #include "XrdSys/XrdSysPthread.hh"
 #include "XrdSfs/XrdSfsInterface.hh"
 #include "XrdCms/XrdCmsClient.hh"
@@ -123,6 +124,10 @@ public:
 
         int            checkpoint(XrdSfsFile::cpAct act,
                                   struct iov *range=0, int n=0);
+
+        int            Clone(XrdSfsFile& srcFile);
+
+        int            Clone(const std::vector<XrdOucCloneSeg> &cVec);
 
         int            close();
 
@@ -430,9 +435,10 @@ XrdCmsClient *Finder;         // ->Cluster Management Service
 
 virtual int   ConfigXeq(char *var, XrdOucStream &, XrdSysError &);
 static  int   Emsg(const char *, XrdOucErrInfo  &, int, const char *x,
-                   XrdOfsHandle *hP);
+                   XrdOfsHandle *hP, bool posChk=false, bool chktype=true);
 static  int   Emsg(const char *, XrdOucErrInfo  &, int, const char *x,
-                   const char *y="");
+                   const char *y="", const char* xtra=0, bool chktype=true);
+static  int   EmsgType(int ecode);
 static  int   fsError(XrdOucErrInfo &myError, int rc);
 const char   *Split(const char *Args, const char **Opq, char *Path, int Plen);
         int   Stall(XrdOucErrInfo  &, int, const char *);
@@ -481,6 +487,7 @@ XrdSysMutex              ocMutex; // Global mutex for open/close
 bool              DirRdr;         // Opendir() can be redirected.
 bool              reProxy;        // Reproxying required for TPC
 bool              OssHasPGrw;     // True: oss implements full rgRead/Write
+bool              tryXERT;        // Try using extended error text from OSS
 
 /******************************************************************************/
 /*                            O t h e r   D a t a                             */

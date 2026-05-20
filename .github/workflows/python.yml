@@ -8,14 +8,14 @@ on:
     paths:
       - setup.py
       - pyproject.toml
-      - 'bindings/**'
+      - 'python/**'
       - .github/workflows/python.yml
     tags-ignore:
   pull_request:
     paths:
       - setup.py
       - pyproject.toml
-      - 'bindings/**'
+      - 'python/**'
   workflow_dispatch:
   release:
     types:

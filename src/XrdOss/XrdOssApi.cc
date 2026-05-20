@@ -37,7 +37,11 @@
 #include <signal.h>
 #include <strings.h>
 #include <cstdio>
+#if defined(__linux__)
+#include <linux/fs.h>
+#endif
 #include <sys/file.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/param.h>
@@ -54,6 +58,7 @@
 #include "XrdOss/XrdOssError.hh"
 #include "XrdOss/XrdOssMio.hh"
 #include "XrdOss/XrdOssTrace.hh"
+#include "XrdOuc/XrdOucCloneSeg.hh"
 #include "XrdOuc/XrdOucEnv.hh"
 #include "XrdOuc/XrdOucName2Name.hh"
 #include "XrdOuc/XrdOucPinLoader.hh"
@@ -252,6 +257,61 @@ int XrdOssSys::GenRemotePath(const char *oldp, char *newp)
     if (strlen(oldp) >= MAXPATHLEN) return -ENAMETOOLONG;
     strcpy(newp, oldp);
     return 0;
+}
+
+/******************************************************************************/
+/*                                  C l o n e                                 */
+/******************************************************************************/
+/*
+  Function: Clone contents of a file from another file.
+
+  Input:    srcFile     - clone contents of this file.
+
+  Output:   Returns XrdOssOK upon success and -errno or -osserr upon failure.
+*/
+
+int XrdOssFile::Clone(XrdOssDF& srcFile)
+{
+#if defined(FICLONE)
+  if (!canClone)
+    return -EPERM;
+
+  if (fd<0)
+     return -EBADF;
+  if (srcFile.getFD() < 0)
+     return -EBADF;
+
+  if (ioctl(fd, FICLONE, srcFile.getFD())==-1)
+    return -errno;
+
+  return XrdOssOK;
+#else
+  return -ENOTSUP;
+#endif
+}
+
+int XrdOssFile::Clone(const std::vector<XrdOucCloneSeg> &cVec)
+{
+#if defined(FICLONERANGE)
+  if (!canClone)
+    return -EPERM;
+
+  if (fd<0)
+     return -EBADF;
+
+  for(auto &seg: cVec)
+    {struct file_clone_range fr;
+     fr.src_fd      = seg.srcFD;
+     fr.src_offset  = seg.srcOffs;
+     fr.src_length  = seg.srcLen;
+     fr.dest_offset = seg.dstOffs;
+     if (ioctl(fd, FICLONERANGE, &fr) == -1) return -errno;
+    }
+
+  return XrdOssOK;
+#else
+  return -ENOTSUP;
+#endif
 }
 
 /******************************************************************************/
@@ -696,6 +756,44 @@ int XrdOssDir::Close(long long *retsz)
 //
    return retc;
 }
+  
+/******************************************************************************/
+/*                                  F c t l                                   */
+/******************************************************************************/
+/*
+  Function: Perform control operations on a file.
+
+  Input:    cmd       - The command.
+            alen      - length of arguments.
+            args      - Pointer to arguments.
+            resp      - Pointer to where response should be placed.
+
+  Output:   Returns XrdOssOK upon success and -errno upon failure.
+*/
+
+int XrdOssDir::Fctl(int cmd, int alen, const char *args, char **resp)
+{
+
+   switch(cmd)
+         {case XrdOssDF::Fctl_utimes: break; // Unsupported
+          case XrdOssDF::Fctl_setFD:
+               if (dfType != DF_isDir) return -ENOTBLK;
+               if (lclfd) return -EALREADY;
+               if (alen != (int)sizeof(int)) return -EINVAL;
+               int retc, newFD;
+               memcpy(&newFD, args, sizeof(int));
+               struct stat buf;
+               do {retc = fstat(newFD, &buf);} while(retc && errno == EINTR);
+               if (retc) return -errno;
+               fd = newFD;
+               if (!(lclfd = fdopendir(newFD))) return -errno;
+               isopen = true;
+               return XrdOssOK;
+               break;
+          default: break;
+         }
+   return -ENOTSUP;
+}
 
 /******************************************************************************/
 /*                     o o s s _ F i l e   M e t h o d s                      */
@@ -794,6 +892,7 @@ int XrdOssFile::Open(const char *path, int Oflag, mode_t Mode, XrdOucEnv &Env)
        if (mopts) mmFile = XrdOssMio::Map(local_path, fd, mopts);
       } else mmFile = 0;
 
+   canClone = !(popts & XRDEXP_NOFICL);
 // Return the result of this open
 //
    return (fd < 0 ? fd : XrdOssOK);
@@ -1075,6 +1174,19 @@ int XrdOssFile::Fctl(int cmd, int alen, const char *args, char **resp)
                if (alen != sizeof(struct timeval)*2 || !args) return -EINVAL;
                utArgs = (const struct timeval *)args;
                if (futimes(fd, utArgs)) return -errno;
+               return XrdOssOK;
+               break;
+          case XrdOssDF::Fctl_setFD:
+               if (dfType != DF_isFile) return -ENOTBLK;
+               if (fd >= 0) return -EALREADY;
+               if (alen != (int)sizeof(int)) return -EINVAL;
+               int retc, newFD;
+               memcpy(&newFD, args, sizeof(int));
+               struct stat buf;
+               do {retc = fstat(newFD, &buf);} while(retc && errno == EINTR);
+               if (retc) return -errno;
+               fd = newFD;
+               FSize = buf.st_size;
                return XrdOssOK;
                break;
           default: break;

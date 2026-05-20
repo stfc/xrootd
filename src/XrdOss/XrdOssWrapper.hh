@@ -48,7 +48,7 @@
 //! This class wraps the object that handles directory as well as file
 //! oriented requests. It is used by the derived class to wrap the object
 //! obtained by calling newDir() or newFile() in class XrdOss.
-  
+
 class XrdOssWrapDF : public XrdOssDF
 {
 public:
@@ -99,6 +99,29 @@ virtual int     StatRet(struct stat *Stat) {return wrapDF.StatRet(Stat);}
 /******************************************************************************/
 /*                 F i l e   O r i e n t e d   M e t h o d s                  */
 /******************************************************************************/
+
+//-----------------------------------------------------------------------------
+//! Clone contents of a file from another file.
+//!
+//! @param  srcFile - Reference to the file to used to clone contents of this
+//!                   file.
+//!
+//! @return 0 upon success or -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual int     Clone(XrdOssDF& srcFile) {return wrapDF.Clone(srcFile);}
+
+//-----------------------------------------------------------------------------
+//! Clone contents of a file from one or more oher files.
+//!
+//! @param  cVec  - A vector of struct XrdOucCloneSeg describing the action.
+//!
+//! @return 0 upon success or -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual int     Clone(const std::vector<XrdOucCloneSeg> &cVec)
+                    {return wrapDF.Clone(cVec);}
+
 //-----------------------------------------------------------------------------
 //! Change file mode settings.
 //!
@@ -223,7 +246,7 @@ virtual ssize_t pgRead (void* buffer, off_t offset, size_t rdlen,
 //-----------------------------------------------------------------------------
 
 virtual int     pgRead (XrdSfsAio* aioparm, uint64_t opts)
-                       {return wrapDF.pgRead(aioparm, opts);}
+                                              {return wrapDF.pgRead(aioparm, opts);}
 
 //-----------------------------------------------------------------------------
 //! Write file pages into a file with corresponding checksums.
@@ -272,6 +295,18 @@ virtual int     pgWrite(XrdSfsAio* aioparm, uint64_t opts)
 
 virtual ssize_t Read(off_t offset, size_t size)
                     {return wrapDF.Read(offset, size);}
+
+//-----------------------------------------------------------------------------
+//! Preread a list of file blocks into the file system cache.
+//!
+//! @param  rlist   - A list of byte ranges to pre-read.
+//!
+//! @return >= 0      When 0, the request was ignored; otherwise, it has been accepted.
+//! @return < 0       Failed with -errno or -osserr (see XrdOssError.hh).
+//-----------------------------------------------------------------------------
+
+virtual ssize_t Read(XrdOucRangeList& rlist)
+                    {return wrapDF.Read(rlist);}
 
 //-----------------------------------------------------------------------------
 //! Read file bytes into a buffer.
@@ -393,6 +428,9 @@ uint16_t        DFType() {return wrapDF.DFType();}
 //!                                Response: Pointer to XrdOucChkPnt object.
 //!                  Fctl_utimes - Set atime and mtime (no response).
 //!                                Argument: struct timeval tv[2]
+//!                  Fctl_setFD  - Set file descriptor for unopened file.
+//!                                Argument: pointer to int file descriptor
+//! @param  alen   - Length of data pointed to by args.
 //! @param  alen   - Length of data pointed to by args.
 //! @param  args   - Data sent with request, zero if alen is zero.
 //! @param  resp   - Where the response is to be set. The caller must call
@@ -403,6 +441,21 @@ uint16_t        DFType() {return wrapDF.DFType();}
 
 virtual int     Fctl(int cmd, int alen, const char *args, char **resp=0)
                     {return wrapDF.Fctl(cmd, alen, args, resp);}
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding
+//! directory or file error (see also XrdOssWrapper::getErrMsg()).
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool    getErrMsg(std::string& eText) {return wrapDF.getErrMsg(eText);}
 
 //-----------------------------------------------------------------------------
 //! Return the underlying file descriptor.
@@ -438,11 +491,11 @@ protected:
 
 XrdOssDF   &wrapDF;  // Object being wrapped
 };
-  
+
 /******************************************************************************/
 /*                   C l a s s   X r d O s s W r a p p e r                    */
 /******************************************************************************/
-  
+
 class XrdOssWrapper : public XrdOss
 {
 public:
@@ -534,6 +587,22 @@ virtual void      EnvInfo(XrdOucEnv *envP) {wrapPI.EnvInfo(envP);}
 //-----------------------------------------------------------------------------
 
 virtual uint64_t  Features() {return wrapPI.Features();}
+
+//-----------------------------------------------------------------------------
+//! Obtain detailed error message text for the immediately preceeding error
+//! returned by any method in this class.
+//!
+//! @param  eText  - Where the message text is to be returned.
+//!
+//! @return True if message text is available, false otherwise.
+//!
+//! @note This method should be called using the same thread that encountered
+//!       the error; otherwise, missleading error text may be returned.
+//! @note Upon return, the internal error message text is cleared.
+//-----------------------------------------------------------------------------
+
+virtual bool      getErrMsg(std::string& eText)
+                           {return wrapPI.getErrMsg(eText);}
 
 //-----------------------------------------------------------------------------
 //! Execute a special storage system operation.

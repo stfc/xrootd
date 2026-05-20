@@ -15,22 +15,25 @@ add_subdirectory(XrdHttpTests)
 
 add_subdirectory(XrdOucTests)
 
+add_subdirectory(XrdThrottleTests)
+
 add_subdirectory( XrdSsiTests )
 
 add_subdirectory(XrdHttpTpc)
 
 add_subdirectory(XrdPfcTests)
 
-if( BUILD_SCITOKENS )
-  add_subdirectory( scitokens )
-endif()
-
 if(NOT ENABLE_SERVER_TESTS)
   return()
 endif()
 
 add_subdirectory(krb5)
+add_subdirectory(scitokens)
 add_subdirectory(tls)
+
+add_subdirectory(XrdClHttpCommon)
+add_subdirectory(XrdClHttp)
+add_subdirectory(XrdClS3)
 
 add_subdirectory( XrdOssTests )
 add_subdirectory( XRootD )
@@ -40,3 +43,4 @@ add_subdirectory( stress )
 add_subdirectory( TPCTests )
 add_subdirectory( badredir )
 add_subdirectory( xcachewithcsi )
+add_subdirectory(XrdSysTests)
