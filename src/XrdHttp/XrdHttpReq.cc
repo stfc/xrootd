@@ -552,6 +552,21 @@ bool XrdHttpReq::Redir(XrdXrootd::Bridge::Context &info, //!< the result context
   char buf[512];
   char hash[512];
   hash[0] = '\0';
+
+  bool invalid_host = false;
+
+  if (!hname) {
+    invalid_host = true;
+  } else {
+    for (const char *c = hname; *c; ++c)
+      if (*c == '\r' || *c == '\n')
+        invalid_host = true;
+  }
+
+  if (invalid_host) {
+    prot->SendSimpleResp(502, nullptr, nullptr, "Invalid redirect host", 0, false);
+    return keepalive;
+  }
   
   if (prot->isdesthttps)
     redirdest = "Location: https://";
@@ -989,7 +1004,7 @@ int XrdHttpReq::ProcessHTTPReq() {
                   if (s.endswith('/'))
                     s.erasefromend(1);
 
-                  s.append(resource);
+                  s.append(encode_str(std::string(resource.c_str())).c_str());
                   appendOpaque(s, 0, 0, 0);
 
                   prot->SendSimpleResp(302, NULL, (char *) s.c_str(), 0, 0, false);
@@ -1102,7 +1117,7 @@ int XrdHttpReq::ProcessHTTPReq() {
               if (s.endswith('/'))
                 s.erasefromend(1);
 
-              s.append(resource);
+              s.append(encode_str(std::string(resource.c_str())).c_str());
               appendOpaque(s, 0, 0, 0);
 
               prot->SendSimpleResp(302, NULL, (char *) s.c_str(), 0, 0, false);
@@ -1333,7 +1348,7 @@ int XrdHttpReq::ProcessHTTPReq() {
             if (found_newline) {
               char *endptr = NULL;
               std::string line_contents(prot->myBuffStart, idx);
-              long long chunk_contents = strtol(line_contents.c_str(), &endptr, 16);
+              long long chunk_contents = strtoll(line_contents.c_str(), &endptr, 16);
                 // Chunk sizes can be followed by trailer information or CRLF
               if (*endptr != ';' && *endptr != '\r') {
                 prot->SendSimpleResp(400, NULL, NULL, (char *)"Invalid chunked encoding", 0, false);
@@ -2429,12 +2444,12 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
                 stringresp += "<lp1:resourcetype><D:collection/></lp1:resourcetype>\n";
                 stringresp += "<lp1:iscollection>1</lp1:iscollection>\n";
               } else {
+                stringresp += "<lp1:resourcetype/>\n";
                 stringresp += "<lp1:iscollection>0</lp1:iscollection>\n";
               }
 
               if (e.flags & kXR_xset) {
                 stringresp += "<lp1:executable>T</lp1:executable>\n";
-                stringresp += "<lp1:iscollection>1</lp1:iscollection>\n";
               } else {
                 stringresp += "<lp1:executable>F</lp1:executable>\n";
               }
@@ -2545,6 +2560,7 @@ int XrdHttpReq::PostProcessHTTPReq(bool final_) {
                   stringresp += "<lp1:resourcetype><D:collection/></lp1:resourcetype>\n";
                   stringresp += "<lp1:iscollection>1</lp1:iscollection>\n";
                 } else {
+                  stringresp += "<lp1:resourcetype/>\n";
                   stringresp += "<lp1:iscollection>0</lp1:iscollection>\n";
                 }
 
