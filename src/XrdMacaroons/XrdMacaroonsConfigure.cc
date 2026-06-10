@@ -180,16 +180,15 @@ bool Handler::xsitename(XrdOucStream &config_obj, XrdSysError *log, std::string 
 bool Handler::xsecretkey(XrdOucStream &config_obj, XrdSysError *log, std::string &secret)
 {
   char *val = config_obj.GetWord();
-  if (!val || !val[0])
-  {
+
+  if (!val || !val[0]) {
     log->Emsg("Config", "Shared secret key not specified");
     return false;
   }
 
-  FILE *fp = fopen(val, "rb");
-
-  if (fp == nullptr) {
-    log->Emsg("Config", errno, "open shared secret key file", val);
+  BIO *bio = BIO_new_file(val, "rb");
+  if (!bio) {
+    log->Emsg("Config", "Failed to open shared secret key file", val);
     return false;
   }
 
@@ -209,8 +208,11 @@ bool Handler::xsecretkey(XrdOucStream &config_obj, XrdSysError *log, std::string
   }
 
   BIO_push(b64, bio);
-  while ((inlen = BIO_read(b64, inbuf, 512)) > 0)
-  {
+
+  int inlen;
+  char inbuf[512];
+
+  while ((inlen = BIO_read(b64, inbuf, 512)) > 0) {
     if (inlen < 0) {
       if (errno == EINTR) continue;
       break;
@@ -218,12 +220,16 @@ bool Handler::xsecretkey(XrdOucStream &config_obj, XrdSysError *log, std::string
       BIO_write(bio_out, inbuf, inlen);
     }
   }
+
   if (inlen < 0) {
+    BIO_free_all(bio_out);
     BIO_free_all(b64);
     log->Emsg("Config", errno, "read secret key.");
     return false;
   }
+
   if (!BIO_flush(bio_out)) {
+    BIO_free_all(bio_out);
     BIO_free_all(b64);
     log->Emsg("Config", errno, "flush secret key.");
     return false;
@@ -231,7 +237,6 @@ bool Handler::xsecretkey(XrdOucStream &config_obj, XrdSysError *log, std::string
 
   char *decoded;
   long data_len = BIO_get_mem_data(bio_out, &decoded);
-  BIO_free_all(b64);
 
   secret = std::string(decoded, data_len);
 
