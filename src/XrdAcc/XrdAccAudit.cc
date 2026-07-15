@@ -59,9 +59,8 @@ void XrdAccAudit::Deny(const char *opname,
                        const char *path)
 {if (auditops & audit_deny)
     {char buff[2048];
-     snprintf(buff, sizeof(buff)-1, "%s deny %s %s@%s %s %s",
+     snprintf(buff, sizeof(buff), "%s deny %s %s@%s %s %s",
               (tident ? tident : ""), atype, id, host, opname, path);
-     buff[sizeof(buff)-1] = '\0';
      mDest->Emsg("Audit", buff);
     }
 }
@@ -78,9 +77,8 @@ void XrdAccAudit::Grant(const char *opname,
                         const char *path)
 {if (auditops & audit_deny)
     {char buff[2048];
-     snprintf(buff, sizeof(buff)-1, "%s grant %s %s@%s %s %s",
+     snprintf(buff, sizeof(buff), "%s grant %s %s@%s %s %s",
               (tident ? tident : ""), atype, id, host, opname, path);
-     buff[sizeof(buff)-1] = '\0';
      mDest->Emsg("Audit", buff);
     }
 }
