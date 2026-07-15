@@ -664,7 +664,10 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
  * */
 
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
-
+  if (std::strlen(pathname)>285){
+  logwrapper((char*)"filename too long");
+  return -EINVAL;
+  }
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
 
   struct stat buf;
@@ -1217,7 +1220,7 @@ ssize_t ceph_aio_read(int fd, XrdSfsAio *aiop, AioCB *cb) {
 int ceph_posix_fstat(int fd, struct stat *buf) {
   CephFileRef* fr = getFileRef(fd);
   if (fr) {
-    logwrapper((char*)__FUNCTION__,": fd %d", fd);
+    logwrapper((char*)"%s: fd %d", __FUNCTION__, fd);
     // minimal stat : only size and times are filled
     // atime, mtime and ctime are set all to the same value
     // mode is set arbitrarily to 0666 | S_IFREG
