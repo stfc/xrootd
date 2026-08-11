@@ -647,6 +647,18 @@ void ceph_posix_set_logfunc(void (*logfunc) (char *, va_list argp)) {
   g_logfunc = logfunc;
 };
 
+int maxSubstringLength(const std::string& path, char delimiter) {
+    std::stringstream ss(path);
+    std::string token;
+    size_t maxLength = 0;
+
+    // Split the string by the specified delimiter
+    while (std::getline(ss, token, delimiter)) {
+        maxLength = std::max(maxLength, token.length());
+    }
+    return maxLength;
+};
+
 static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long size);
 
 /**
@@ -664,9 +676,16 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
  * */
 
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
-  if (std::strlen(pathname)>285){
-  logwrapper((char*)"filename too long");
+  if (std::strlen(pathname)>1021){
+  logwrapper((char*)"path name too long");
   return -EINVAL;
+  }
+  else{
+  std::string pathstr(pathname);
+  if (maxSubstringLength(pathstr, '/') > 254){
+    logwrapper((char*)"file/subpath name too long");
+    return -EINVAL;
+    }
   }
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
 
