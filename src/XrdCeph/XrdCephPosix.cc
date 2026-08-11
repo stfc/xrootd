@@ -678,13 +678,13 @@ static int ceph_posix_internal_truncate(const CephFile &file, unsigned long long
 int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode){
   if (std::strlen(pathname)>1021){
   logwrapper((char*)"path name too long");
-  return -EINVAL;
+  return -ENAMETOOLONG;
   }
   else{
   std::string pathstr(pathname);
   if (maxSubstringLength(pathstr, '/') > 254){
     logwrapper((char*)"file/subpath name too long");
-    return -EINVAL;
+    return -ENAMETOOLONG;
     }
   }
   CephFileRef fr = getCephFileRef(pathname, env, flags, mode, 0);
