@@ -9,7 +9,7 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	98%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}
+Release:	97%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
