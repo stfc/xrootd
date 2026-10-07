@@ -111,7 +111,7 @@ XrdSysMutex g_init_mutex;
 //JW Counter for number of times a given cluster is resolved.
 std::map<unsigned int, unsigned long long> g_idxCntr;
 
-double g_ECcorrectionFactor;
+double g_ECcorrectionFactor = 1.0;
 
 /// Accessor to next ceph pool index
 /// Note that this is not thread safe, but we do not care
