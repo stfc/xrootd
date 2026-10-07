@@ -1,4 +1,3 @@
-%bcond_with    asan
 %bcond_with    ceph
 %bcond_with    clang
 %bcond_with    docs
@@ -9,14 +8,14 @@
 
 Name:		xrootd
 Epoch:		1
-Release:	1%{?dist}%{?with_clang:.clang}%{?with_asan:.asan}
+Release:	1%{?dist}%{?with_clang:.clang}
 Summary:	Extended ROOT File Server
 Group:		System Environment/Daemons
 License:	LGPL-3.0-or-later AND BSD-2-Clause AND BSD-3-Clause AND curl AND MIT AND Zlib
 URL:		https://xrootd.org
 
 %if !%{with git}
-Version:	6.1.1
+Version:	6.2.0
 Source0:	https://xrootd.web.cern.ch/download/v%{version}/%{name}-%{version}.tar.gz
 %else
 %define git_version %(tar xzf %{_sourcedir}/%{name}.tar.gz -O xrootd/VERSION)
@@ -59,10 +58,6 @@ BuildRequires:	voms-devel
 BuildRequires:	scitokens-cpp-devel
 BuildRequires:  libxcrypt-devel
 
-%if %{with asan}
-BuildRequires:	libasan
-%endif
-
 %if %{with ceph}
 BuildRequires:	librados-devel
 BuildRequires:	libradosstriper-devel
@@ -87,7 +82,13 @@ BuildRequires:	krb5-server
 BuildRequires:	krb5-workstation
 BuildRequires:	openssl
 BuildRequires:	procps-ng
+BuildRequires:	python3-pytest
 BuildRequires:	sqlite
+%if 0%{?fedora}
+BuildRequires:	util-linux-script
+%else
+BuildRequires:	util-linux
+%endif
 %endif
 
 %if %{with xrdec}
@@ -308,7 +309,6 @@ export CXX=clang++
 
 %cmake \
     -DFORCE_ENABLED:BOOL=TRUE \
-    -DENABLE_ASAN:BOOL=%{with asan} \
     -DENABLE_CEPH:BOOL=%{with ceph} \
     -DENABLE_FUSE:BOOL=TRUE \
     -DENABLE_KRB5:BOOL=TRUE \
@@ -354,14 +354,14 @@ doxygen Doxyfile
 	rm -f %{buildroot}%{_libdir}/libXrdCephPosix.so
 %endif
 
+%{__python3} -m pip install \
+	--no-deps --ignore-installed --disable-pip-version-check --verbose \
+	--prefix %{buildroot}%{_prefix} %{_vpath_builddir}/python/dist/*.whl
+
 rm -f %{buildroot}%{python3_sitearch}/xrootd-*.*-info/direct_url.json
 rm -f %{buildroot}%{python3_sitearch}/xrootd-*.*-info/RECORD
 [ -r %{buildroot}%{python3_sitearch}/xrootd-*.*-info/INSTALLER ] && \
 	sed s/pip/rpm/ -i %{buildroot}%{python3_sitearch}/xrootd-*.*-info/INSTALLER
-
-%{__python3} -m pip install \
-	--no-deps --ignore-installed --disable-pip-version-check --verbose \
-	--prefix %{buildroot}%{_prefix} %{_vpath_builddir}/python
 
 %if %{with docs}
 LD_LIBRARY_PATH=%{buildroot}%{_libdir} \
@@ -695,6 +695,12 @@ fi
 %endif
 
 %changelog
+
+* Tue Sep 29 2026 Guilherme Amadio <amadio@cern.ch> - 1:6.2.0-1
+- XRootD 6.2.0
+
+* Thu Sep 24 2026 Guilherme Amadio <amadio@cern.ch> - 1:5.9.8-1
+- XRootD 5.9.8
 
 * Fri Aug 10 2026 Guilherme Amadio <amadio@cern.ch> - 1:6.1.1-1
 - XRootD 6.1.1

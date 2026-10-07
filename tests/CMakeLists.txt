@@ -5,6 +5,7 @@ endif()
 include(GoogleTest)
 
 add_subdirectory(unit)
+add_subdirectory(integration)
 
 add_subdirectory(common)
 
@@ -14,6 +15,8 @@ add_subdirectory(XrdEc)
 add_subdirectory(XrdPosix)
 
 add_subdirectory(XrdHttpTests)
+
+add_subdirectory(XrdHttpTapeApi)
 
 add_subdirectory(XrdMacaroons)
 
