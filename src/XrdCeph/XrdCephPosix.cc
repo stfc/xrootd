@@ -682,7 +682,7 @@ int ceph_posix_open(XrdOucEnv* env, const char *pathname, int flags, mode_t mode
   }
   else{
   std::string pathstr(pathname);
-  if (maxSubstringLength(pathstr, '/') > 254){
+  if (maxSubstringLength(pathstr, '/') > 255){
     logwrapper((char*)"file/subpath name too long");
     return -ENAMETOOLONG;
     }
